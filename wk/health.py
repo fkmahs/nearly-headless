@@ -1,9 +1,9 @@
-"""wk health: is the system getting healthier on tokens? One short table over every Claude Code transcript on this
+"""nh health: is the system getting healthier on tokens? One short table over every Claude Code transcript on this
 laptop (~/.claude/projects: chats, and their agents under <session>/subagents/), by period, per day.
 
 Read-only. Message text is never kept or shown: a transcript is read only for API call usage, the app's agent run
 notices (their token, tool and time counts, and whether the summary mentions a review), reply-check rejections (a
-"Stop hook feedback" line naming something missing), and three commands with their exit status (`wk refresh`,
+"Stop hook feedback" line naming something missing), and three commands with their exit status (`nh refresh`,
 `gh pr create`'s PR link, `gh pr merge`).
 
 Periods: today so far, yesterday, this week (Monday to today), last week, the previous N full days, in local time.
@@ -29,9 +29,9 @@ THRESHOLD = 0.10  # a change smaller than this either way is flat
 NOTE = re.compile(r"<task-id>(\w+)</task-id>.*?<summary>(.*?)</summary>.*?<subagent_tokens>(\d+)</subagent_tokens>"
                   r"\s*<tool_uses>(\d+)</tool_uses>\s*<duration_ms>(\d+)</duration_ms>", re.S)
 # a command's start: the start of the line or of a segment after && || ; | or (, then an optional PowerShell call
-# operator, `env` and VAR=value settings; so `grep "gh pr merge" f` or `rg "wk refresh" README.md` never count
+# operator, `env` and VAR=value settings; so `grep "gh pr merge" f` or `rg "nh refresh" README.md` never count
 START = r"""(?:^|&&|\|\||[;|\n(])\s*(?:&\s*)?(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*"""
-WK = r"""(?:(?:"[^"\n]*[\\/]|[^\s"';&|()]*[\\/])?wk(?:\.exe|\.cmd|\.bat)?"?|(?:py|python3?)(?:\.exe)?(?:\s+-\w+)*\s+-m\s+wk)"""
+WK = r"""(?:(?:"[^"\n]*[\\/]|[^\s"';&|()]*[\\/])?(?:wk|nh)(?:\.exe|\.cmd|\.bat)?"?|(?:py|python3?)(?:\.exe)?(?:\s+-\w+)*\s+-m\s+wk)"""
 REFRESH = re.compile(START + WK + r"\s+refresh\b")
 MERGE = re.compile(START + r"gh(?:\.exe)?\s+pr\s+merge\b([^;&|\n]*)")
 CREATE = re.compile(START + r"gh(?:\.exe)?\s+pr\s+create\b")
@@ -59,13 +59,13 @@ MEASURES = [
     ("reviews", "reviews per merged PR", "lower"),
     ("piece_tokens", "agent tokens per merged PR (M)", "lower"),
     ("rejections", "reply-check rejections", "lower"),
-    ("refresh", "wk refresh uses", ""),
-    ("refused", "wk refresh refusals", "lower"),
+    ("refresh", "nh refresh uses", ""),
+    ("refused", "nh refresh refusals", "lower"),
 ]
 
 
 def cache_file() -> Path:
-    return Path(tempfile.gettempdir()) / "work-kit" / "health-cache.json"
+    return Path(tempfile.gettempdir()) / "nearly-headless" / "health-cache.json"
 
 
 def _root(cwd: str) -> str:
@@ -100,7 +100,7 @@ def _text(content) -> str:
 # ---------------------------------------------------------------- reading one transcript
 
 def parse(path: Path) -> dict:
-    """What one transcript holds for wk health; nothing of its text but the markers in the module's note."""
+    """What one transcript holds for nh health; nothing of its text but the markers in the module's note."""
     calls, notes, rejects, refresh, merges, creates, pending = {}, [], {}, {}, {}, [], {}
     with open(path, "rb") as handle:
         for raw in handle:
@@ -161,7 +161,7 @@ def parse(path: Path) -> dict:
 
 
 class Records(usage.Records):
-    """Parsed transcripts, kept by size and change time (the token page's reader, keeping wk health's facts)."""
+    """Parsed transcripts, kept by size and change time (the token page's reader, keeping nh health's facts)."""
     version = CACHE_VERSION
     parse = staticmethod(parse)
 
@@ -208,11 +208,11 @@ def gather(root: Path, cache: Path | None = None) -> dict:
 
 
 def tags(top: Path | None = None) -> list[tuple[datetime, str]]:
-    """work-kit's releases (vX.Y.Z tags) and when each was made, oldest first; none when this isn't a git checkout."""
+    """The kit's releases (vX.Y.Z tags) and when each was made, oldest first; none when this isn't a git checkout."""
     top = top or Path(__file__).resolve().parents[1]
     try:
         out = core.git(top, "tag", "-l", "v*", "--format=%(refname:short)|%(creatordate:iso-strict)", check=False)
-    except (OSError, core.WorkkitError):
+    except (OSError, core.KitError):
         return []
     found = []
     for line in out.splitlines():
@@ -380,14 +380,14 @@ def text(h: dict) -> str:
     shown = [p for p in h["periods"] if not p["hidden"]]
     week = next(p for p in shown if p["name"] == "this week")
     rows = [["per day"] + [p["name"] for p in shown] + ["healthier", "this vs last week"],
-            ["work-kit version"] + [_span(p["versions"]) for p in shown] + ["", ""]]
+            ["nearly-headless version"] + [_span(p["versions"]) for p in shown] + ["", ""]]
     for key, label, way in MEASURES:
         rows.append([label] + [_num(p["measures"][key], key) for p in shown]
                     + [way or "-", week["verdicts"][key]])
         if key == "piece_tokens":
             rows.append(["  merged PRs tied to a builder"] + [p["measures"]["tied"] for p in shown] + ["", ""])
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
-    lines = [f"work-kit health at {h['now'].replace('T', ' ')[:16]}: every figure is per day; today counts as "
+    lines = [f"nearly-headless health at {h['now'].replace('T', ' ')[:16]}: every figure is per day; today counts as "
              f"{shown[0]['days']:.2f} of a day."]
     lines += ["  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows]
     worse = [label for key, label, _ in MEASURES if week["verdicts"][key] == "worse"]

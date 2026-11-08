@@ -1,4 +1,4 @@
-"""`wk reply-check`: a Claude Code Stop hook that holds a supervisor's reply to the format the owner asked for.
+"""`nh reply-check`: a Claude Code Stop hook that holds a supervisor's reply to the format the owner asked for.
 
 Off until this laptop's settings file names the parts every supervisor reply must contain:
 
@@ -18,16 +18,16 @@ It also holds a supervisor to recording its support work, unless the settings fi
 
 A turn (everything since the owner's last message) that did work for the owner - drafted a message or email for
 someone, investigated (web search, a web page, a research agent), or reviewed a document - but ran no
-`wk piece add` and no `wk piece note ... --add/--file` (itself or through a subagent; a refused one or --help
+`nh piece add` and no `nh piece note ... --add/--file` (itself or through a subagent; a refused one or --help
 doesn't count) is sent back once to record it. A turn that only revises a draft also passes when the turn before
 it recorded one. Only the turn's tool calls and, for a draft, the owner's ask and Claude's text are read: answering
-questions about the list or work-kit, and the supervisor's own duties (keeping the list, starting and reviewing
+questions about the list or nearly-headless, and the supervisor's own duties (keeping the list, starting and reviewing
 builders, merging, releasing, checking local or test sites, rereading its skills or instructions), call none of
 those tools, so they pass. A turn someone else started once the last one stopped - another chat's message, an
 agent's hand-back or task notification, a hook - is not support for the owner, and is a turn of its own, so the
 owner's earlier turn isn't counted again; one that arrives while the owner's turn is still running stays part of it.
 
-`wk reply-check --remind` is its UserPromptSubmit hook: before each turn it prints one short line naming those parts,
+`nh reply-check --remind` is its UserPromptSubmit hook: before each turn it prints one short line naming those parts,
 so a reply is written right the first time; nothing when none are set. The Stop hook stays the safety net.
 """
 
@@ -93,10 +93,10 @@ _DOCFILE = re.compile(r"\.(?:pdf|docx?|xlsx?|xlsm|csv|pptx?|rtf|odt)$", re.I)
 _URL = re.compile(r"https?://[^\s\"'\\]+", re.I)
 _LOCAL = re.compile(r"^https?://(?:localhost|127\.0\.0\.1|\[::1\]|[^/:]*\.(?:localhost|test)"  # the command center,
                     r"|(?:[^/:]*[.-])?(?:staging|stage|test|qa|uat|sandbox|preview)\d*[.-][^/]*)(?:[:/]|$)", re.I)
-# a write is `wk piece add` or `wk piece note ... --add/--file`, run as a command of its own: wk, wk.cmd, a path to
-# it, a variable holding it ($wk, & $W), py -m wk or py bin/wk, with any global flags before `piece`; not a grep for
-# the words, nor --help
-_WK = r"[\"']?(?:[^\s\"';&|]*[\\/])?wk(?:\.cmd|\.exe)?[\"']?"
+# a write is `nh piece add` or `nh piece note ... --add/--file`, run as a command of its own: nh or wk, nh.cmd, a
+# path to it, a variable holding it ($nh, & $W), py -m wk or py bin/nh, with any global flags before `piece`; not a
+# grep for the words, nor --help
+_WK = r"[\"']?(?:[^\s\"';&|]*[\\/])?(?:wk|nh)(?:\.cmd|\.exe)?[\"']?"
 _RECORDED = re.compile(r"(?:^|[;&|(\n]|\b(?:then|do)\s)\s*&?\s*"
                        r"(?:" + _WK + r"|\$\{?[\w:]+\}?|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*(?:-m\s+wk|" + _WK + r"))"
                        r"(?:\s+--?[\w-]+(?:[ =](?!piece\b)[^\s;&|-][^\s;&|]*)?)*"
@@ -188,7 +188,7 @@ def _turn(transcript: Path, asks: int = 2) -> list[dict]:
 
 
 def _writes(calls: list, failed: set) -> bool:
-    """A `wk piece add` or a writing `wk piece note` ran and wasn't refused."""
+    """A `nh piece add` or a writing `nh piece note` ran and wasn't refused."""
     for b in calls:
         given = b.get("input") if isinstance(b.get("input"), dict) else {}
         if b.get("name") in ("Bash", "PowerShell") and b.get("id") not in failed and any(
@@ -199,7 +199,7 @@ def _writes(calls: list, failed: set) -> bool:
 
 def support(entries) -> list[str]:
     """What this turn (since the owner's last message) did for the owner that a piece should record; [] when it
-    did none of it, or it (or one of its subagents) ran a `wk piece add` or a `wk piece note` that writes. A turn
+    did none of it, or it (or one of its subagents) ran a `nh piece add` or a `nh piece note` that writes. A turn
     that only revises a draft also passes when the turn before it wrote one."""
     ask, attached, calls, text, sent = "", set(), [], [], set()  # sent: what the owner attached, maybe apart
     side, before, failed = [], [], set()  # side: subagents' calls; before: the previous turn's calls
@@ -314,8 +314,8 @@ def reason(missing: list[str]) -> str:
         if m.startswith(RECORD):
             did = m[len(RECORD):].strip(" ()")
             said.append(f"This turn is missing {RECORD}: it did work for the owner ({did}) and recorded none of it. "
-                        "Record it before you stop: a new ask is its own new piece (`wk piece add`, with a note); "
-                        "more work on the piece it belongs to is a dated line (`wk piece note <id> --add`). Never a "
+                        "Record it before you stop: a new ask is its own new piece (`nh piece add`, with a note); "
+                        "more work on the piece it belongs to is a dated line (`nh piece note <id> --add`). Never a "
                         "line on an unrelated piece, nor new work on one already billed: that is a new piece "
                         "(`--billed-ok` is only for a release or teardown note). Then end as you would have.")
     return " ".join(said)

@@ -1,9 +1,9 @@
 # Communication channels
 
 Where this client's work is talked about, and how to read each place. The scheduled routing run reads this file and
-keeps work-kit's rules for every run (`skills/supervisor/routing.md`). It lives in the client repo's
+keeps the kit's rules for every run (`skills/supervisor/routing.md`). It lives in the client repo's
 `.work/communication_channels.md`, so it never reaches the client. Write it with the owner, in plain words, one
-`## <channel>` section each; `wk channels <repo>` saves hand edits.
+`## <channel>` section each; `nh channels <repo>` saves hand edits.
 
 TEMPLATE: the channels below are made-up examples. Replace them with the client's own, then delete this line; no routing run reads a channel while it is here.
 

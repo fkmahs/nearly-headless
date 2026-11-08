@@ -7,11 +7,11 @@ description: What Would I Do, the WWID skill. Reads the WWID profile repo (wwid_
 
 **Suggest mode** (on): every supervisor reply to the owner ends with a guess at how they'll answer; their verdicts are kept, so the profile improves daily. **Responder mode** (v2) answers waiting chats for them; it is off until the owner starts it themselves: only then read `responder.md` in this folder.
 
-**The owner** is the person `owner` (or `approver`) names in this laptop's settings file (`~/.workkit/settings.toml`, or the file `$WORKKIT_SETTINGS` names); call them by that name.
+**The owner** is the person `owner` (or `approver`) names in this laptop's settings file (`~/.nearly-headless/settings.toml`, or the file `$NH_SETTINGS` names); call them by that name.
 
-**First, find the profile repo.** The evidence lives in the WWID profile repo, outside work-kit: the folder `wwid_profile` names in that settings file (`wk doctor` shows it). It is written `wwid/` below: how they decide (`wwid/patterns.md`), profiles, decision episodes, replays, research, and `wwid/verdicts.md`.
+**First, find the profile repo.** The evidence lives in the WWID profile repo, outside nearly-headless: the folder `wwid_profile` names in that settings file (`nh doctor` shows it). It is written `wwid/` below: how they decide (`wwid/patterns.md`), profiles, decision episodes, replays, research, and `wwid/verdicts.md`.
 
-**Off without it.** When `wwid_profile` isn't set, or its folder has no `verdicts.md`, WWID is off on this laptop: add no section, record nothing, and if asked, say in one line that WWID is off because no profile repo is set (`wk setup --profile <folder>` turns it on).
+**Off without it.** When `wwid_profile` isn't set, or its folder has no `verdicts.md`, WWID is off on this laptop: add no section, record nothing, and if asked, say in one line that WWID is off because no profile repo is set (`nh setup --profile <folder>` turns it on).
 
 ## The section
 At the end of **every reply a supervisor sends the owner**; never in builder reports or worker chats.

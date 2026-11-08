@@ -1,10 +1,10 @@
 """The command center: one local page that scans every repo in this laptop's settings and shows where each stands:
 what needs the owner, each product with its supervisor, its open pieces with their PRs and builder chats, loose ends
-left on the laptop, hours not yet billed, and whether work-kit itself is current. Read-only.
+left on the laptop, hours not yet billed, and whether nearly-headless itself is current. Read-only.
 
 Speed: every repo is read at the same time, and `serve` keeps the newest view in memory and refreshes it in the
 background, so the page opens at once. Client names come from this laptop's settings (`client = "..."` under a
-repo), never from work-kit.
+repo), never from nearly-headless.
 """
 
 from __future__ import annotations
@@ -27,20 +27,20 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__, check, core, guard, settings, system, turns, upkeep, usage, work
-from .core import WorkkitError
+from .core import KitError
 
 
 def _gh(cwd: Path, *args: str) -> str:
     result = core.run(["gh", *args], 60, cwd=str(cwd))
     if result.returncode:
-        raise WorkkitError("gh: " + (result.stderr.strip() or "failed"))
+        raise KitError("gh: " + (result.stderr.strip() or "failed"))
     return result.stdout
 
 
 # ---------------------------------------------------------------- is CI running, and is each builder still active
 #
 # GitHub refusing to run CI (a failed payment or a spending limit) looks like an ordinary failed run; check.py tells
-# them apart (never_started). Runs are read once per check.RUNS_EVERY seconds per repo, shared with wk check's
+# them apart (never_started). Runs are read once per check.RUNS_EVERY seconds per repo, shared with nh check's
 # failing-tests finding (Check GitHub now reads them at once); a finished run's jobs are read once.
 
 CI_EVERY = check.RUNS_EVERY
@@ -77,7 +77,7 @@ def ci_state(top: Path, base: str, fetch: bool = False) -> dict | None:
                       "text": f"CI on {base} has not run since it was stopped ({stale})" if stale else f"CI failing on {base}"}
         else:
             result = {"state": "ok", "text": "CI fine" if runs else "CI: no recent runs"}
-    except (WorkkitError, ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+    except (KitError, ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
         result = {"state": "unknown", "text": "CI status unknown: GitHub could not be asked"}
     _ci_runs[key] = (now, result)
     return result
@@ -212,12 +212,12 @@ def _branches(top: Path, base: str, prs: list[dict], products: list[dict]) -> li
     return sorted(found, key=lambda b: (order[b["where"]], b["name"]))
 
 
-PROBLEMS_EVERY = 300.0  # seconds between `wk check` runs per repo (Check GitHub now runs it at once)
+PROBLEMS_EVERY = 300.0  # seconds between `nh check` runs per repo (Check GitHub now runs it at once)
 _checked: dict[str, tuple[float, list[dict]]] = {}
 
 
 def _problems(s: dict, name: str, path: str, fetch: bool, fetched: Future | None = None) -> list[dict]:
-    """`wk check`'s findings for one repo, kept PROBLEMS_EVERY seconds (Check GitHub now asks afresh). `fetched` is the
+    """`nh check`'s findings for one repo, kept PROBLEMS_EVERY seconds (Check GitHub now asks afresh). `fetched` is the
     repo's git fetch still running."""
     key, now = f"{name}|{path}", time.monotonic()
     seen = _checked.get(key)
@@ -230,13 +230,13 @@ def _problems(s: dict, name: str, path: str, fetch: bool, fetched: Future | None
 
 
 def _checks(s: dict, name: str, base: str, out: dict, fetch: bool, job: Future | None = None) -> None:
-    """`wk check` for one repo: each list's problem count on the page, its repo's shared ones, and code that reached
+    """`nh check` for one repo: each list's problem count on the page, its repo's shared ones, and code that reached
     the base branch without a PR as an alert. `job` is the findings already being gathered (_problems). A check
     that fails says so and never hides the rest."""
     try:
         found = job.result() if job is not None else _problems(s, name, out.get("path", ""), fetch)
     except Exception as exc:  # noqa: BLE001 - the page must still show everything else
-        out["alerts"].append(f"{name}: wk check could not run ({exc})")
+        out["alerts"].append(f"{name}: nh check could not run ({exc})")
         return
     # a parked list (no supervisor) has nobody to fix its findings yet: they show, marked as waiting, and count nowhere
     parked = {p["product"] for p in out["products"] if not p.get("supervisor")}
@@ -252,7 +252,7 @@ def _checks(s: dict, name: str, base: str, out: dict, fetch: bool, job: Future |
     for x in found:
         if x["kind"] == "main" and not waits(x):
             out["alerts"].append(f"{name}: code reached {base} without a PR ({x['item']}: {x['what'].split(': ', 1)[-1]}). "
-                                 f"Ask the owner to look; then wk check {name} --ack {x['item']} --reason \"...\"")
+                                 f"Ask the owner to look; then nh check {name} --ack {x['item']} --reason \"...\"")
 
 
 def _repo(s: dict, name: str, fetch: bool) -> dict:
@@ -260,12 +260,12 @@ def _repo(s: dict, name: str, fetch: bool) -> dict:
            "attention": [], "alerts": []}
     try:
         top = settings.repo(s, name)
-    except WorkkitError as exc:
+    except KitError as exc:
         out["error"] = str(exc)
         out["attention"].append(f"{name}: {exc}")
         out["alerts"].append(f"{name}: {exc}")
         return out
-    # Speed: the git fetch, GitHub's open PRs and wk check (the slowest part, whose own questions to GitHub need no
+    # Speed: the git fetch, GitHub's open PRs and nh check (the slowest part, whose own questions to GitHub need no
     # fetch) all start at once; what reads the fetched branches waits for the fetch.
     with ThreadPoolExecutor(max_workers=3) as pool:
         fetched = pool.submit(core.run, ["git", "-C", str(top), "fetch", "--quiet", "--prune", "origin"], 120) \
@@ -292,7 +292,7 @@ def _view(s: dict, name: str, top: Path, fetch: bool, out: dict, prs_job: Future
     try:
         prs = json.loads(prs_job.result() or "[]")
         out["prs"] = sorted(prs, key=lambda p: p.get("updatedAt", ""), reverse=True)
-    except (WorkkitError, ValueError, OSError, subprocess.SubprocessError) as exc:
+    except (KitError, ValueError, OSError, subprocess.SubprocessError) as exc:
         out["prs"], out["prs_error"] = [], str(exc)
     # the PRs' files feed the queue's overlap check, then leave the page's data
     open_files = None if "prs_error" in out else work.pr_files(out["prs"])
@@ -303,7 +303,7 @@ def _view(s: dict, name: str, top: Path, fetch: bool, out: dict, prs_job: Future
     for p in out["products"]:
         try:
             p["queue"] = work.queue_status(s, work.Repo(s, name), p["product"], prs=open_files)
-        except WorkkitError as exc:
+        except KitError as exc:
             p["queue"] = {"items": [], "error": str(exc)}
     on_pieces = set()
     for p in out["products"]:
@@ -338,7 +338,7 @@ def _view(s: dict, name: str, top: Path, fetch: bool, out: dict, prs_job: Future
             out["alerts"].append(f"{name}: expired turn on {t['resource']} held by {t['holder']}")
     out["ci"] = guard.check(top)
     out["ci_state"] = ci_state(top, base, fetch)
-    # failing tests on the base branch, once wk check reports them as "Tests failing", need no alert as well
+    # failing tests on the base branch, once nh check reports them as "Tests failing", need no alert as well
     if ((out["ci_state"] or {}).get("state") in ("stopped", "failing")
             and not (out["ci_state"].get("tests") and out.get("base_tests_failing"))):
         out["alerts"].append(f"{name}: {out['ci_state']['text']}")
@@ -348,7 +348,7 @@ def _view(s: dict, name: str, top: Path, fetch: bool, out: dict, prs_job: Future
 
 
 def kit(fetch: bool = False) -> dict:
-    """This laptop's work-kit: its version, the newest release on GitHub, and whether the skills are current."""
+    """This laptop's nearly-headless: its version, the newest release on GitHub, and whether the skills are current."""
     latest, installed = upkeep.latest_version(fetch), upkeep.installed_version()
     return {"version": __version__, "installed": installed, "restart": upkeep.newer(installed),
             "latest": latest, "behind": upkeep.newer(latest),
@@ -356,7 +356,7 @@ def kit(fetch: bool = False) -> dict:
 
 
 def restart_alert(k: dict) -> str:
-    return (f"This command center runs work-kit {k['version']}, and {k['installed']} is installed: it moves to "
+    return (f"This command center runs nearly-headless {k['version']}, and {k['installed']} is installed: it moves to "
             f"{k['installed']} on its own within a minute. Refresh then.")
 
 
@@ -378,14 +378,14 @@ def overview(s: dict, fetch: bool = False) -> dict:
         k = kit_job.result()
     alerts = [a for r in repos for a in r["alerts"]]
     if k["behind"]:
-        alerts.append(f"work-kit {k['latest']} is out (this laptop has {k['version']}): run wk update")
+        alerts.append(f"nearly-headless {k['latest']} is out (this laptop has {k['version']}): run nh update")
     if k["restart"]:
         alerts.append(restart_alert(k))
-    alerts += [f"{c}: run wk update" for c in k["stale_skills"]]
+    alerts += [f"{c}: run nh update" for c in k["stale_skills"]]
     attention = [a for r in repos for a in r["attention"] if a not in r["alerts"]] + alerts
     try:
         parts = system.overview(s)
-    except Exception as exc:  # the work-kit page's picture must never take the rest of the page down
+    except Exception as exc:  # the nearly-headless page's picture must never take the rest of the page down
         parts = {"error": f"{type(exc).__name__}: {exc}"}
     return {"owner": s.get("owner", ""), "at": time.strftime("%Y-%m-%d %H:%M"), "repos": repos, "kit": k, "system": parts,
             "alerts": alerts, "attention": attention,
@@ -441,9 +441,9 @@ class Settings:
                 self.stamp = stamp
                 try:
                     if stamp is None:
-                        raise WorkkitError(f"Cannot read {core.posix(self.where)}: the file is missing")
+                        raise KitError(f"Cannot read {core.posix(self.where)}: the file is missing")
                     self.s, self.error = settings.load(self.where), ""
-                except WorkkitError as exc:
+                except KitError as exc:
                     self.error = f"{exc}. Showing the settings from before until it is fixed"
             return self.s
 
@@ -476,7 +476,7 @@ class Cache:
                                if busy else "")
         if not why:
             return view
-        alert = f"This command center shows the view from {view.get('at', '?')}: {why}. Use Check GitHub now, or restart wk serve if it persists."
+        alert = f"This command center shows the view from {view.get('at', '?')}: {why}. Use Check GitHub now, or restart nh serve if it persists."
         flagged = view | {key: [alert] + view.get(key, []) for key in ("alerts", "attention")}
         return flagged | {"busy": True} if busy else flagged  # busy: not fresh, so Check GitHub now says it wasn't checked
 
@@ -495,7 +495,7 @@ class Cache:
             self._build(False)
         except Exception as exc:  # noqa: BLE001 - a failed refresh must show on the page, not die silently
             self.failed = f"the background refresh failed at {time.strftime('%H:%M')} ({type(exc).__name__}: {exc})"
-            print(f"wk serve: {self.failed}", file=sys.stderr, flush=True)
+            print(f"nh serve: {self.failed}", file=sys.stderr, flush=True)
         finally:
             self.lock.release()
 
@@ -524,7 +524,7 @@ class Server(ThreadingHTTPServer):
 
 
 def running(port: int) -> dict | None:
-    """What already answers at 127.0.0.1:port: None when nothing does; else the command center's work-kit version, if
+    """What already answers at 127.0.0.1:port: None when nothing does; else the command center's nearly-headless version, if
     it is one."""
     try:
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
@@ -545,7 +545,7 @@ def _handler(cache: Cache, notice: list[str]) -> type[BaseHTTPRequestHandler]:
             if parts[0] == "note" and len(parts) == 4:  # /note/<repo>/<product>/<piece>
                 try:
                     text = work.read_note(work.Repo(cache.settings.get(), parts[1]), parts[2], parts[3]) or "No note yet."
-                except WorkkitError as exc:
+                except KitError as exc:
                     code, text = 404, str(exc)
                 body, kind = (f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' "
                               f"content='width=device-width,initial-scale=1'><title>{_e(parts[3])} note</title>"
@@ -561,7 +561,7 @@ def _handler(cache: Cache, notice: list[str]) -> type[BaseHTTPRequestHandler]:
                 kind = "text/html; charset=utf-8"
                 try:
                     body = usage.page(usage.report(cache.settings.get(), min(52, max(1, int(weeks)))))
-                except (ValueError, OSError, WorkkitError) as exc:  # the tab says why, as plain text
+                except (ValueError, OSError, KitError) as exc:  # the tab says why, as plain text
                     code, body, kind = 500, str(exc), "text/plain; charset=utf-8"
                 body = body.encode()
             else:
@@ -587,8 +587,8 @@ def _handler(cache: Cache, notice: list[str]) -> type[BaseHTTPRequestHandler]:
 
 # ---------------------------------------------------------------- serving, and moving to a new release on its own
 #
-# `wk serve` is a small keeper: it holds the address and runs the command center itself in a child process, a worker.
-# When work-kit's version on disk changes (wk update), the keeper starts a worker on the new code, on the same
+# `nh serve` is a small keeper: it holds the address and runs the command center itself in a child process, a worker.
+# When the kit's version on disk changes (nh update), the keeper starts a worker on the new code, on the same
 # listening socket, waits until it answers, then tells the old one to finish its requests and stop. The address is
 # never let go, so no other program can take it in between, and if the new worker fails the old one keeps serving and
 # the page says so. The keeper itself stays on the code it started with, so it does as little as possible, and it
@@ -613,11 +613,11 @@ def _shared(line: str) -> socket.socket:
 
 
 class Worker:
-    """One command center process, started by the keeper on whatever work-kit is on disk now."""
+    """One command center process, started by the keeper on whatever nearly-headless is on disk now."""
 
     def __init__(self, cmd: list[str], kit: Path, sock: socket.socket):
         extra = {} if sys.platform == "win32" else {"pass_fds": [sock.fileno()]}
-        env = os.environ | {"PYTHONPATH": str(kit), "WORKKIT_AUTO_UPDATE": "0"}  # only the keeper's own command updates
+        env = os.environ | {"PYTHONPATH": str(kit), "NH_AUTO_UPDATE": "0"}  # only the keeper's own command updates
         self.proc = subprocess.Popen(cmd, cwd=str(kit), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      text=True, encoding="utf-8", errors="replace", **extra)
         self.version, self.lines = "", queue.Queue()
@@ -666,7 +666,7 @@ class Worker:
 
 
 class Keeper:
-    """Holds the listening socket and keeps one worker answering on it, on the newest work-kit on disk."""
+    """Holds the listening socket and keeps one worker answering on it, on the newest nearly-headless on disk."""
 
     def __init__(self, sock: socket.socket, cmd: list[str], kit: Path):
         self.sock, self.cmd, self.kit = sock, cmd, kit
@@ -693,7 +693,7 @@ class Keeper:
     def check(self) -> None:
         """One look: start a worker again if it stopped; move to a new release once its version has held still."""
         if self.current is None or self.current.proc.poll() is not None:
-            print("wk serve: the command center stopped; starting it again", file=sys.stderr, flush=True)
+            print("nh serve: the command center stopped; starting it again", file=sys.stderr, flush=True)
             self.current = self._start()
             return
         version = self.on_disk()
@@ -704,17 +704,17 @@ class Keeper:
         new = self._start()
         if new is None:
             self.failed[version] = time.monotonic()
-            self.current.send(f"note work-kit {version} is installed, but this command center could not restart on "
+            self.current.send(f"note nearly-headless {version} is installed, but this command center could not restart on "
                               f"it, so it still runs {self.current.version}. It tries again in 5 minutes; to restart by "
-                              "hand, stop wk serve (Ctrl+C in its window) and run it again.")
-            print(f"wk serve: could not move to work-kit {version}; still on {self.current.version}", file=sys.stderr,
+                              "hand, stop nh serve (Ctrl+C in its window) and run it again.")
+            print(f"nh serve: could not move to nearly-headless {version}; still on {self.current.version}", file=sys.stderr,
                   flush=True)
             return
         old, self.current = self.current, new
         stopping = threading.Thread(target=old.stop, daemon=True)
         stopping.start()
         self.stopping.append(stopping)
-        print(f"wk serve: moved to work-kit {new.version}", flush=True)
+        print(f"nh serve: moved to nearly-headless {new.version}", flush=True)
 
     def close(self) -> None:
         if self.current is not None:
@@ -728,22 +728,22 @@ def serve(s: dict, port: int = 8765, where: Path | None = None) -> None:
     other = running(port)
     if other is not None:
         if not other["version"]:
-            raise WorkkitError(f"Something else is using {url}. Pick another address: wk serve --port {port + 1}")
+            raise KitError(f"Something else is using {url}. Pick another address: nh serve --port {port + 1}")
         if upkeep.newer(__version__, other["version"]):
-            raise WorkkitError(f"A command center is already running at {url}, on the older work-kit "
+            raise KitError(f"A command center is already running at {url}, on the older nearly-headless "
                                f"{other['version']} (this laptop has {__version__}). Stop it with Ctrl+C in its "
-                               "terminal, then run wk serve again.")
-        raise WorkkitError(f"The command center is already running: open {url}")
+                               "terminal, then run nh serve again.")
+        raise KitError(f"The command center is already running: open {url}")
     try:
         held = Server(("127.0.0.1", port), BaseHTTPRequestHandler)  # the keeper only holds the address
     except OSError as exc:
-        raise WorkkitError(f"Cannot use {url} ({exc.strerror or exc}). Pick another address: wk serve --port {port + 1}")
+        raise KitError(f"Cannot use {url} ({exc.strerror or exc}). Pick another address: nh serve --port {port + 1}")
     cmd = [sys.executable, "-P", "-m", "wk", *(["--settings", str(where)] if where else []), "serve", "--port", str(port),
            "--worker"]
     keeper = Keeper(held.socket, cmd, upkeep.KIT)
     try:
         if not keeper.begin():
-            raise WorkkitError("The command center could not start; the reason is above")
+            raise KitError("The command center could not start; the reason is above")
         print(f"Command center: {url}  (Ctrl+C to stop)", flush=True)
         while True:
             time.sleep(VERSION_EVERY)

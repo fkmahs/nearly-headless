@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 KIT = Path(__file__).resolve().parents[1]
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import cli, core, privacy, turns, upkeep  # noqa: E402
 
@@ -74,8 +74,8 @@ class Guard(unittest.TestCase):
         self.settings.write_text(f'owner = "Pat Lee"\n\n[privacy]\nterms = ["Globex"]\n\n[repos.acme]\n'
                                  f'path = "{core.posix(self.tmp / "acme")}"\nclient = "Acme Corp"\n\n[repos.kit]\n'
                                  f'path = "{core.posix(self.pub)}"\npublic = true\n', encoding="utf-8")
-        self.env = os.environ | {"WORKKIT_SETTINGS": str(self.settings), "WORKKIT_AUTO_UPDATE": "0"}
-        done = privacy.install_hook(self.pub, KIT / "bin" / "wk")
+        self.env = os.environ | {"NH_SETTINGS": str(self.settings), "NH_AUTO_UPDATE": "0"}
+        done = privacy.install_hook(self.pub, KIT / "bin" / "nh")
         self.assertTrue(done["installed"])
         self.assertTrue(privacy.hook_installed(self.pub))
 
@@ -107,8 +107,16 @@ class Guard(unittest.TestCase):
     def test_someone_elses_hook_is_kept(self):
         path = privacy.hook_path(self.pub)
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        self.assertFalse(privacy.install_hook(self.pub, KIT / "bin" / "wk")["installed"])
+        self.assertFalse(privacy.install_hook(self.pub, KIT / "bin" / "nh")["installed"])
         self.assertEqual(path.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
+
+    def test_the_hook_an_older_release_wrote_is_replaced(self):
+        path = privacy.hook_path(self.pub)
+        path.write_text('#!/bin/sh\n# work-kit: the privacy guard: a push ...\nexec sh "/old/bin/wk" privacy push "$@"\n',
+                        encoding="utf-8")
+        self.assertFalse(privacy.hook_installed(self.pub))  # doctor asks for setup
+        self.assertTrue(privacy.install_hook(self.pub, KIT / "bin" / "nh")["changed"])
+        self.assertEqual(path.read_text(encoding="utf-8"), privacy.hook_text(KIT / "bin" / "nh"))
 
     def test_the_clean_tree_leaves_out_the_list_and_is_scanned(self):
         (self.pub / ".work").mkdir()
@@ -151,28 +159,40 @@ class Guard(unittest.TestCase):
 
 
 class Forwarding(unittest.TestCase):
-    """bin/wk forwards to the kit the settings name, so `wk` from the old folder on PATH runs the new clone."""
+    """bin/nh forwards to the kit the settings name, so `nh` from another folder on PATH runs that clone; bin/wk is
+    bin/nh by its first name; and setup never forwards, so it makes the checkout it runs from the kit."""
 
-    def test_bin_wk_forwards_to_the_named_kit(self):
+    def test_bin_nh_forwards_to_the_named_kit_and_setup_never_does(self):
         tmp = Path(tempfile.mkdtemp())
         new = tmp / "new kit"
         (new / "bin").mkdir(parents=True)
-        (new / "bin" / "wk").write_text('#!/bin/sh\necho "NEW $WORKKIT_FORWARDED $*"\nexit 7\n', encoding="utf-8")
+        (new / "bin" / "nh").write_text('#!/bin/sh\necho "NEW $NH_FORWARDED $*"\nexit 7\n', encoding="utf-8")
         s = tmp / "s.toml"
         s.write_text(f'owner = "x"\nkit = "{core.posix(new)}"\n\n[repos.a]\nkit = "nowhere"\n', encoding="utf-8")
-        env = os.environ | {"WORKKIT_SETTINGS": str(s)}
-        env.pop("WORKKIT_FORWARDED", None)
-        done = subprocess.run(["sh", str(KIT / "bin" / "wk"), "version", "a b"], capture_output=True, text=True,
+        env = os.environ | {"NH_SETTINGS": str(s)}
+        env.pop("NH_FORWARDED", None)
+        for launcher in ("nh", "wk"):
+            done = subprocess.run(["sh", str(KIT / "bin" / launcher), "version", "a b"], capture_output=True,
+                                  text=True, env=env)
+            self.assertEqual(done.returncode, 7, done.stderr)
+            self.assertTrue(done.stdout.startswith("NEW "))
+            self.assertTrue(done.stdout.rstrip().endswith("version a b"))
+        done = subprocess.run(["sh", str(KIT / "bin" / "nh"), "setup", "--help"], capture_output=True, text=True,
                               env=env)
-        self.assertEqual(done.returncode, 7, done.stderr)
-        self.assertTrue(done.stdout.startswith("NEW "))
-        self.assertTrue(done.stdout.rstrip().endswith("version a b"))
+        self.assertEqual(done.returncode, 0, done.stderr)  # ran here: setup makes this checkout the kit
+        self.assertNotIn("NEW", done.stdout)
+        old = env | {"WORKKIT_SETTINGS": str(s)}  # the settings variable before 1.56.0 still counts
+        old.pop("NH_SETTINGS")
+        self.assertEqual(subprocess.run(["sh", str(KIT / "bin" / "nh"), "version"], capture_output=True,
+                                        text=True, env=old).returncode, 7)
         s.write_text('owner = "x"\n', encoding="utf-8")  # no kit named: it runs here
-        done = subprocess.run(["sh", str(KIT / "bin" / "wk"), "version"], capture_output=True, text=True, env=env)
-        self.assertEqual((done.returncode, done.stdout.strip()), (0, cli.__version__))
+        for launcher in ("nh", "wk"):
+            done = subprocess.run(["sh", str(KIT / "bin" / launcher), "version"], capture_output=True, text=True,
+                                  env=env)
+            self.assertEqual((done.returncode, done.stdout.strip()), (0, cli.__version__))
 
     def test_doctor_says_which_checkout_ran(self):
-        line = upkeep.ran_from({}, {"WORKKIT_FORWARDED": "/somewhere/old"})
+        line = upkeep.ran_from({}, {"NH_FORWARDED": "/somewhere/old"})
         self.assertIn(f"ran from {core.posix(upkeep.KIT)}", line)
         self.assertIn("forwarded by /somewhere/old/bin", line)
         self.assertNotIn("forwarded", upkeep.ran_from({}, {}))

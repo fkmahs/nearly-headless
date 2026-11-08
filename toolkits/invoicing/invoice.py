@@ -1,9 +1,9 @@
-"""Invoicing: work-kit's optional toolkit for billing a client by the hours recorded in its repos.
+"""Invoicing: the kit's optional toolkit for billing a client by the hours recorded in its repos.
 
 It reads each client repo's hours through `wk`, freezes them into a statement, records the invoice in the client's
-ledger, prints the client PDF, and has `wk hours mark` label those hours with the invoice number so they are never
-billed twice. It refuses to invoice while a piece finished since `coverage_from` is neither paid for by hours (`wk hours
-add --for`) nor marked bill later or not billing (`wk piece set --bill`), so no finished work is missed. A client's billing record lives in its own repo's `billing/` folder (never in `.work/`, never here):
+ledger, prints the client PDF, and has `nh hours mark` label those hours with the invoice number so they are never
+billed twice. It refuses to invoice while a piece finished since `coverage_from` is neither paid for by hours (`nh hours
+add --for`) nor marked bill later or not billing (`nh piece set --bill`), so no finished work is missed. A client's billing record lives in its own repo's `billing/` folder (never in `.work/`, never here):
 
     billing/client.toml   prefix, repos, rate, terms, bill-to, coverage_from, and per product: group and ref
     billing/ledger.json   every invoice: period, hours, rate, amount, hashes, sent, paid
@@ -32,10 +32,10 @@ from datetime import date, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-KIT = HERE.parents[1]  # this toolkit ships inside work-kit
+KIT = HERE.parents[1]  # this toolkit ships inside nearly-headless
 TEMPLATE = HERE / "invoice.html"
 PROJECTS = Path("C:/Projects")  # the profile and client PDFs never live under here
-# key: the list's named invoice line the hours bill on (wk hours --line-key); "" is its usual line. Older lack the
+# key: the list's named invoice line the hours bill on (nh hours --line-key); "" is its usual line. Older lack the
 # last ones.
 COLUMNS = ["date", "repo", "product", "hours", "note", "by", "ref", "group", "line", "pieces", "key"]
 # The statement's two data tables: the hours, one row each, and each list's ref, group and invoice line, one row per
@@ -55,13 +55,13 @@ class Refused(Exception):
     pass
 
 
-# ---------------------------------------------------------------- work-kit, through its CLI only
+# ---------------------------------------------------------------- nearly-headless, through its CLI only
 
 def wk(*args: str) -> object:
-    """Run work-kit's `wk --json ...` and return its JSON. The kit is $WORKKIT_HOME, else the one this ships in."""
-    kit = os.environ.get("WORKKIT_HOME") or str(KIT)
+    """Run the kit's `nh --json ...` and return its JSON. The kit is $NH_HOME, else the one this ships in."""
+    kit = os.environ.get("NH_HOME") or str(KIT)
     env = os.environ | {"PYTHONPATH": kit, "PYTHONIOENCODING": "utf-8",
-                        "WORKKIT_AUTO_UPDATE": "0"}  # work-kit must not update itself between counting and marking
+                        "NH_AUTO_UPDATE": "0"}  # nearly-headless must not update itself between counting and marking
     run = subprocess.run([sys.executable, "-P", "-m", "wk", "--json", *args], capture_output=True, text=True,
                          encoding="utf-8", env=env)
     if run.returncode not in (0, 3):
@@ -74,13 +74,13 @@ def wk(*args: str) -> object:
 # ---------------------------------------------------------------- the client's billing record
 
 def billing_dir(repo: str) -> Path:
-    """The billing/ folder in that repo's main checkout, found through this laptop's work-kit settings."""
-    sys.path.insert(0, os.environ.get("WORKKIT_HOME") or str(KIT))
+    """The billing/ folder in that repo's main checkout, found through this laptop's nearly-headless settings."""
+    sys.path.insert(0, os.environ.get("NH_HOME") or str(KIT))
     from wk import settings
-    from wk.core import WorkkitError
+    from wk.core import KitError
     try:
         return settings.repo(settings.load(settings.path()), repo) / "billing"
-    except WorkkitError as exc:
+    except KitError as exc:
         raise Refused(str(exc)) from exc
 
 
@@ -112,7 +112,7 @@ class Client:
 
 
 def rows_digest(rows: list[dict]) -> str:
-    """The same digest as work-kit's work.rows_digest, so `wk hours mark` marks exactly the rows this counted."""
+    """The same digest as the kit's work.rows_digest, so `nh hours mark` marks exactly the rows this counted."""
     lines = sorted("\t".join(x[k] for k in ("date", "product", "hours", "note")) for x in rows)
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
@@ -153,7 +153,7 @@ def problems(c: Client, rows: list[dict]) -> list[str]:
             found.append(f"{r['repo']} {r['product']}: no group or ref in client.toml")
         if r["key"] and not r["line"]:
             found.append(f"{r['repo']} {r['product']}: hours bill on the line '{r['key']}', which the list doesn't "
-                         f"have. Add it (wk product set ... --line {r['key']}=\"...\") or move them (wk hours fix "
+                         f"have. Add it (nh product set ... --line {r['key']}=\"...\") or move them (nh hours fix "
                          f"... --line-key \"\")")
         bad = JARGON.search(r["line"].replace("**", ""))
         if bad:
@@ -185,7 +185,7 @@ def coverage(c: Client, rows: list[dict], through: str) -> dict:
     for r in rows:
         if r["product"] != calls and r["date"] >= start and not r["pieces"]:
             out["problems"].append(f"{r['repo']} {r['product']} {r['date']} '{r['note']}': name the pieces these "
-                                   f"hours pay for (wk hours fix ... --for P3)")
+                                   f"hours pay for (nh hours fix ... --for P3)")
     for repo in c.cfg["repos"]:
         for product in wk("product", "list", repo):
             if product == calls:
@@ -196,13 +196,13 @@ def coverage(c: Client, rows: list[dict], through: str) -> dict:
                 billed = sorted({b for _, b in hours.get(key, []) if b})
                 if x.get("bill") == "no" and unbilled_:
                     out["problems"].append(f"{name} is marked not billing but has unbilled hours: move them to the "
-                                           f"right piece (wk hours fix ... --for) or bill it (--bill yes)")
+                                           f"right piece (nh hours fix ... --for) or bill it (--bill yes)")
                 if x.get("bill") == "later" and unbilled_:
                     out["problems"].append(f"{name} is marked bill later but has unbilled hours: switch it to "
-                                           f"--bill yes to bill them, or move them (wk hours fix ... --for)")
+                                           f"--bill yes to bill them, or move them (nh hours fix ... --for)")
                 if unbilled_ and billed:
                     out["billed_before"].append(f"{name} (also on {', '.join(billed)})")
-                day = x.get("finished") or x["updated"]  # pieces merged before work-kit 1.21 have no finished
+                day = x.get("finished") or x["updated"]  # pieces merged before nearly-headless 1.21 have no finished
                 out["pieces"].append({"repo": repo, "product": product, "id": x["id"], "piece": x["piece"],
                                       "state": x["state"], "pr": x.get("pr") or "", "bill": x.get("bill") or "",
                                       "finished": day if x["state"] in ("merged", "done") else "",
@@ -216,7 +216,7 @@ def coverage(c: Client, rows: list[dict], through: str) -> dict:
                 else:
                     out["not_covered"].append(name + (" (finished after it was last billed, with no new hours)"
                                                       if billed else ""))
-    out["problems"] += [f"{n}: finished but not billed. Book its hours (wk hours add ... --for), or mark it "
+    out["problems"] += [f"{n}: finished but not billed. Book its hours (nh hours add ... --for), or mark it "
                         f"--bill later or --bill no" for n in out["not_covered"]]
     return out
 
@@ -277,7 +277,7 @@ def _md(head: list[str], rows: list[list]) -> list[str]:
 
 
 def reason(repo: str, product: str, pid: str, said: str) -> str:
-    """The newest reason in the piece's note for billing it later or not at all (wk piece set --bill ... --reason)."""
+    """The newest reason in the piece's note for billing it later or not at all (nh piece set --bill ... --reason)."""
     text = wk("piece", "note", repo, product, pid).get("note") or ""
     found = [ln.split(f"{said}: ", 1)[1].strip() for ln in text.splitlines() if f"{said}: " in ln]
     return found[-1] if found else ""

@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import core, settings, upkeep, work
-from .core import WorkkitError
+from .core import KitError
 
 FLAG_DAYS = 2      # a breach older than this no longer shows
 CACHE_VERSION = 1
@@ -66,7 +66,7 @@ def window() -> int | None:
     """The compact window in Claude's settings, or None when it isn't set (then there is no limit to check)."""
     try:
         value = core.read_json(upkeep.claude_dir() / "settings.json").get(upkeep.WINDOW)
-    except (WorkkitError, AttributeError):
+    except (KitError, AttributeError):
         return None
     return value if isinstance(value, int) and value > 0 else None
 
@@ -91,7 +91,7 @@ def sessions_of(link: str, apps: list[Path] | None = None) -> set[str]:
             for rec in place.glob(f"*/*/local_{uid}.json"):
                 try:
                     cli = core.read_json(rec).get("cliSessionId")
-                except (WorkkitError, AttributeError):
+                except (KitError, AttributeError):
                     continue
                 if isinstance(cli, str) and cli:
                     found.add(cli.lower())
@@ -104,7 +104,7 @@ def supervisors(s: dict, apps: list[Path] | None = None) -> dict[str, dict]:
     for name in s.get("repos") or {}:
         try:
             products = work.Repo(s, name).products()
-        except WorkkitError:
+        except KitError:
             continue
         for product, fields in products.items():
             for sid in sessions_of(str(fields.get("supervisor") or ""), apps):
@@ -181,7 +181,7 @@ class Records:
     _shared: dict[str, "Records"] = {}
     _lock = threading.Lock()
     version = CACHE_VERSION
-    parse = None  # what is kept of one transcript: this module's parse; wk health keeps other things (health.Records)
+    parse = None  # what is kept of one transcript: this module's parse; nh health keeps other things (health.Records)
 
     def __init__(self, cache: Path):
         self.cache, self.files, self.lock = cache, {}, threading.Lock()
@@ -189,7 +189,7 @@ class Records:
             data = core.read_json(cache) if cache.is_file() else {}
             if data.get("version") == self.version:
                 self.files = data.get("files") or {}
-        except (WorkkitError, AttributeError):
+        except (KitError, AttributeError):
             self.files = {}
 
     @classmethod
@@ -263,7 +263,7 @@ def _label(path: Path, is_sub: bool) -> str:
         return "supervisor chat"
     try:
         what = str(core.read_json(path.with_suffix(".meta.json")).get("description") or "")
-    except (WorkkitError, AttributeError):
+    except (KitError, AttributeError):
         what = ""
     return f"builder \"{what}\"" if what else f"builder {path.stem}"
 

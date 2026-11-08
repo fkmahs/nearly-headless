@@ -1,4 +1,4 @@
-"""`wk reply-check`, the Stop hook that holds a supervisor's reply to the format, and its install. Temp home only."""
+"""`nh reply-check`, the Stop hook that holds a supervisor's reply to the format, and its install. Temp home only."""
 
 import io
 import json
@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import cli, core, upkeep  # noqa: E402
 
@@ -38,7 +38,7 @@ class ReplyCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.settings = self.tmp / "workkit" / "settings.toml"
+        self.settings = self.tmp / "nh" / "settings.toml"
         self.settings.parent.mkdir()
         self.settings.write_text(ON, encoding="utf-8")
         self.log = self.settings.parent / "reply-check.log"
@@ -76,7 +76,7 @@ class ReplyCheck(unittest.TestCase):
         self.assertNotIn("All well", self.log.read_text(encoding="utf-8"))  # no message text in the log
 
     def test_a_supervisor_reply_with_every_part_is_let_through(self):
-        for loaded in (skill_call("supervisor"), skill_call("work-kit:supervisor"), skill_text("supervisor")):
+        for loaded in (skill_call("supervisor"), skill_call("nearly-headless:supervisor"), skill_text("supervisor")):
             self.assertIsNone(self.run_hook(self.hook(self.transcript(loaded))))
         self.assertEqual([x.split("\t")[2] for x in self.logged()], ["ok"] * 3)
 
@@ -164,7 +164,7 @@ class SupportRecord(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.settings = self.tmp / "workkit" / "settings.toml"
+        self.settings = self.tmp / "nh" / "settings.toml"
         self.settings.parent.mkdir()
         self.settings.write_text("", encoding="utf-8")
         self.log = self.settings.parent / "reply-check.log"
@@ -191,20 +191,20 @@ class SupportRecord(unittest.TestCase):
     def test_a_drafted_reply_with_no_piece_write_is_sent_back(self):
         got = self.run_hook(self.turn("Read Sam's email and draft a reply for me", said(DRAFT)))
         self.assertEqual(got["decision"], "block")
-        self.assertIn("missing a piece record", got["reason"])  # wk health counts feedback naming what's missing
-        self.assertIn("wk piece add", got["reason"])
+        self.assertIn("missing a piece record", got["reason"])  # nh health counts feedback naming what's missing
+        self.assertIn("nh piece add", got["reason"])
         self.assertIn("already billed", got["reason"])
         self.assertIn("`--billed-ok` is only for a release or teardown note", got["reason"])
         self.assertTrue(self.logged()[0].endswith("\ts1\tmissing: a piece record (a drafted message)"))
         self.assertNotIn("Sam", self.log.read_text(encoding="utf-8"))  # no message text in the log
 
     def test_the_same_turn_with_a_piece_add_or_a_note_line_passes(self):
-        for write in ('wk piece add acme support "Reply to Sam about the fix"',
-                      '& $wk piece note acme support P7 --add "Drafted the reply to Sam"',
-                      'W=C:/work-kit/bin/wk.cmd; $W piece note acme support P7 --file note.md'):
+        for write in ('nh piece add acme support "Reply to Sam about the fix"',
+                      '& $nh piece note acme support P7 --add "Drafted the reply to Sam"',
+                      'W=C:/nearly-headless/bin/wk.cmd; $W piece note acme support P7 --file note.md'):
             path = self.turn("Read Sam's email and draft a reply for me", tool("Bash", command=write), said(DRAFT))
             self.assertIsNone(self.run_hook(path), write)
-        reading = self.turn("Draft a reply to Sam", tool("Bash", command="wk piece note acme support P7"), said(DRAFT))
+        reading = self.turn("Draft a reply to Sam", tool("Bash", command="nh piece note acme support P7"), said(DRAFT))
         self.assertEqual(self.run_hook(reading)["decision"], "block")  # reading a note records nothing
         self.assertEqual([x.split("\t")[2] for x in self.logged()],
                          ["ok"] * 3 + ["missing: a piece record (a drafted message)"])
@@ -224,12 +224,12 @@ class SupportRecord(unittest.TestCase):
 
     def test_list_questions_and_duty_work_pass(self):
         turns = [
-            ("What's next on the list? Reply in a table", [tool("Bash", command="wk piece list acme support")],
+            ("What's next on the list? Reply in a table", [tool("Bash", command="nh piece list acme support")],
              "Next is P3; its draft PR is ready."),
-            ("How does wk refresh work?", [tool("Read", file_path="C:/Projects/work-kit/README.md")],
+            ("How does nh refresh work?", [tool("Read", file_path="C:/Projects/nearly-headless/README.md")],
              "It merges main into the PR's branch."),
             ("Yes, merge and release", [tool("Bash", command="gh pr merge 12 --squash"),
-                                        tool("Bash", command="wk piece set acme support P3 --state merged"),
+                                        tool("Bash", command="nh piece set acme support P3 --state merged"),
                                         tool("mcp__Claude_Browser__navigate", url="http://localhost:8765/"),
                                         tool("mcp__Claude_Browser__computer", action="screenshot")],
              "Merged and released; the command center shows 1.48.0."),
@@ -244,13 +244,13 @@ class SupportRecord(unittest.TestCase):
         self.assertTrue(all(x.endswith("\tok") for x in self.logged()))
 
     def test_the_turn_runs_from_the_owners_last_message_across_notifications_and_compaction(self):
-        later = [tool("Bash", command='wk piece add acme support "Reply to Sam"'),
+        later = [tool("Bash", command='nh piece add acme support "Reply to Sam"'),
                  line("user", [{"type": "text", "text": "<task-notification> agent done </task-notification>"}]),
                  line("user", [{"type": "text", "text": "This session is being continued from a previous "
                                                         "conversation."}], isCompactSummary=True),
                  said(DRAFT)]
         self.assertIsNone(self.run_hook(self.turn("Draft a reply to Sam", *later)))
-        path = self.turn("Draft a reply to Sam", tool("Bash", command='wk piece add acme support "Reply"'), said(DRAFT))
+        path = self.turn("Draft a reply to Sam", tool("Bash", command='nh piece add acme support "Reply"'), said(DRAFT))
         with path.open("a", encoding="utf-8") as f:
             f.write(line("user", "Now look into Pat's question") + "\n" + tool("WebSearch", query="x") + "\n")
         self.assertEqual(self.run_hook(path)["decision"], "block")  # a new ask needs its own record
@@ -290,37 +290,37 @@ class SupportRecord(unittest.TestCase):
         got = self.run_hook(path)
         self.assertEqual(got["decision"], "block")
         self.assertIn("(an investigation)", got["reason"])
-        revised = self.turn("Draft a reply to Sam", tool("Bash", command='wk piece add acme support "Reply"'),
+        revised = self.turn("Draft a reply to Sam", tool("Bash", command='nh piece add acme support "Reply"'),
                             said(DRAFT), self.STOPPED, self.PEER, said("Reread it."), self.STOPPED,
                             line("user", "Shorter reply please"), said(DRAFT))
         self.assertIsNone(self.run_hook(revised))  # the record from his last turn still covers a revision
 
     def test_revising_a_draft_passes_on_the_record_made_since_the_previous_ask(self):
-        path = self.turn("Draft a reply to Sam", tool("Bash", command='wk piece note acme support P7 --add "Draft"'),
+        path = self.turn("Draft a reply to Sam", tool("Bash", command='nh piece note acme support P7 --add "Draft"'),
                          said(DRAFT), line("user", "Shorter reply, and drop the second line"), said(DRAFT))
         self.assertIsNone(self.run_hook(path))
         path = self.turn("Draft a reply to Sam", said(DRAFT), line("user", "Shorter reply please"), said(DRAFT))
         self.assertEqual(self.run_hook(path)["decision"], "block")  # nothing recorded in either turn
 
     def test_only_a_write_that_ran_counts(self):
-        for spoof in ('grep -rn "piece add" wk/', "wk piece add --help", "rg 'wk piece note P7 --add' .",
-                      'echo done # see wk piece add', "wk piece note acme support P7 -h --add",
+        for spoof in ('grep -rn "piece add" wk/', "nh piece add --help", "rg 'nh piece note P7 --add' .",
+                      'echo done # see nh piece add', "nh piece note acme support P7 -h --add",
                       "python bin/wk --help piece add", "grep -n 'py bin/wk piece add' README.md"):
             path = self.turn("Draft a reply to Sam", tool("Bash", command=spoof), said(DRAFT))
             self.assertEqual(self.run_hook(path)["decision"], "block", spoof)
-        refused = self.turn("Draft a reply to Sam", tool("Bash", id="w1", command="wk piece note a s P7 --add x"),
+        refused = self.turn("Draft a reply to Sam", tool("Bash", id="w1", command="nh piece note a s P7 --add x"),
                             result("w1", error=True), said(DRAFT))
         self.assertEqual(self.run_hook(refused)["decision"], "block")
-        for ran in ("cd C:/repo && wk piece add a s x", "py -m wk piece add a s x", '"C:/bin/wk.cmd" piece add a s x',
+        for ran in ("cd C:/repo && nh piece add a s x", "wk piece add a s x", '"C:/kit/bin/nh" piece add a s x', "py -m wk piece add a s x", '"C:/bin/wk.cmd" piece add a s x',
                     "$W = 'wk'; & $W piece note a s P7 --add x", "python bin/wk piece add a s x",
                     "py bin/wk piece note a s P7 --add x", "py -I C:/kit/bin/wk piece add a s x",
-                    "wk --json piece add a s x", "bin/wk -C x piece add a s x",
+                    "nh --json piece add a s x", "bin/wk -C x piece add a s x",
                     "wk --settings=C:/s.toml --cwd C:/repo piece note a s P7 --add x --billed-ok"):
             path = self.turn("Draft a reply to Sam", tool("Bash", id="w2", command=ran), result("w2"), said(DRAFT))
             self.assertIsNone(self.run_hook(path), ran)
 
     def test_a_subagents_write_counts(self):
-        write = tool("Bash", command='wk piece add acme support "Reply to Sam"')
+        write = tool("Bash", command='nh piece add acme support "Reply to Sam"')
         sidechain = json.loads(write) | {"isSidechain": True}
         path = self.turn("Draft a reply to Sam", json.dumps(sidechain), said(DRAFT))
         self.assertIsNone(self.run_hook(path))
@@ -382,7 +382,7 @@ class Install(unittest.TestCase):
         path = self.claude / "settings.json"
         path.parent.mkdir(parents=True)
         mine = {"type": "command", "command": "echo hello"}
-        old = {"type": "command", "command": '"D:/old place/work-kit/bin/wk" reply-check', "timeout": 30}
+        old = {"type": "command", "command": '"D:/old place/nearly-headless/bin/wk" reply-check', "timeout": 30}
         path.write_text(json.dumps({"theme": "dark", "hooks": {"Stop": [{"hooks": [mine]}, {"hooks": [old]}],
                                                                "SessionStart": [{"matcher": "startup",
                                                                                  "hooks": [mine]}]}}),
@@ -395,7 +395,7 @@ class Install(unittest.TestCase):
         self.assertEqual(after["hooks"]["Stop"], [  # the owner's kept, our old copy replaced, no matcher
             {"hooks": [mine]}, {"hooks": [{"type": "command", "command": upkeep.hook_command(upkeep.REPLY),
                                            "timeout": 30}]}])
-        self.assertTrue(upkeep.hook_command(upkeep.REPLY).endswith('/bin/wk" reply-check'))
+        self.assertTrue(upkeep.hook_command(upkeep.REPLY).endswith('/bin/nh" reply-check'))
         self.assertTrue(upkeep.hook_check()[1]["ok"])
         text = path.read_text(encoding="utf-8")
         self.assertEqual(upkeep.install_hook(upkeep.REPLY),

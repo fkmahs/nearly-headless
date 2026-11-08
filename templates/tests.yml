@@ -1,6 +1,6 @@
-# work-kit CI template: copy to .github/workflows/tests.yml and replace the test step.
+# nearly-headless CI template: copy to .github/workflows/tests.yml and replace the test step.
 # CI minutes are a capped budget: PRs and pushes to main only, drafts skipped, superseded runs cancelled,
-# a time cap, and recording work (.work/) never runs CI. `wk doctor` checks every repo against these rules.
+# a time cap, and recording work (.work/) never runs CI. `nh doctor` checks every repo against these rules.
 name: tests
 on:
   pull_request:

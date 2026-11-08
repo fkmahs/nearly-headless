@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 KIT = Path(__file__).resolve().parents[1]
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
+os.environ["NH_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
 
 from wk import cli, core, settings, work  # noqa: E402
 
@@ -157,7 +157,7 @@ class Work(unittest.TestCase):
         text = path.read_text(encoding="utf-8").splitlines()
         cells, at = text[4].split("\t"), text[0].split("\t").index("rank")
         self.assertTrue(cells[0] == "P4" and cells[at] == "")
-        cells[at] = "7"  # closed P4 with a rank, as a piece closed by an older work-kit could have
+        cells[at] = "7"  # closed P4 with a rank, as a piece closed by an older nearly-headless could have
         text[4] = "\t".join(cells)
         path.write_text("\n".join(text) + "\n", encoding="utf-8")
         self.wk("piece", "add", "acme", "reports", "Anything")  # any write drops it
@@ -193,7 +193,7 @@ class Work(unittest.TestCase):
         self.assertEqual(self.wk("hours", "mark", "acme", "--through", "2026-10-31", "--as", "INV-1", "--expect", "2")[0], 0)
         code, out = self.wk("piece", "note", "acme", "reports", "P1", "--add", "Drafted a reply to Sam")
         self.assertEqual(code, 2)
-        self.assertIn("billed (INV-1). New work on it is a new piece: wk piece add", out)
+        self.assertIn("billed (INV-1). New work on it is a new piece: nh piece add", out)
         self.assertIn("--billed-ok", out)  # the message names both choices
         self.assertNotIn("Drafted a reply", self.on_github(".work/reports/notes/P1.md"))
         self.assertEqual(self.wk("piece", "note", "acme", "reports", "P1", "--add", "Released 2.1.0",
@@ -344,7 +344,7 @@ class Work(unittest.TestCase):
         self.assertIn("--reason", out)
         code, out = self.wk("piece", "set", "acme", "reports", "P2", "--bill", "no", "--reason", "Fixed fee")
         self.assertEqual(code, 2)  # unbilled hours name it: move them first
-        self.assertIn("wk hours fix ... --for", out)
+        self.assertIn("nh hours fix ... --for", out)
         self.wk("hours", "fix", "acme", "reports", "--date", "2026-10-20", "--for", "P1")
         self.wk("hours", "mark", "acme", "--through", "2026-10-20", "--as", "INV-1", "--expect", "2")
         self.wk("hours", "add", "acme", "reports", "1", "--note", "z", "--date", "2026-10-21", "--for", "P2")
@@ -370,7 +370,7 @@ class Work(unittest.TestCase):
         path = self.app / ".work" / "reports" / "pieces.tsv"
         self.assertEqual(work.pieces(work.Repo(settings.load(self.settings), "acme"), "reports")[0]["finished"],
                          date.today().isoformat())
-        # a piece merged by an older work-kit: no finished, last changed 2026-10-20
+        # a piece merged by an older nearly-headless: no finished, last changed 2026-10-20
         lines = path.read_text(encoding="utf-8").splitlines()
         head, row = lines[0].split("\t"), lines[1].split("\t")
         row[head.index("updated")], row[head.index("finished")] = "2026-10-20", ""
@@ -684,7 +684,7 @@ class Work(unittest.TestCase):
                                         text=True).stdout.strip(), head)
 
     def recall(self, hook: dict | str, settings=None, host: str = "") -> tuple[int, str]:
-        """wk recall as Claude's compaction hook runs it: the session as JSON on stdin."""
+        """nh recall as Claude's compaction hook runs it: the session as JSON on stdin."""
         out, real = io.StringIO(), (sys.stdin, os.environ.get("CLAUDE_CODE_HOST_SESSION_ID"))
         sys.stdin = io.StringIO(hook if isinstance(hook, str) else json.dumps(hook))
         os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = host
@@ -763,7 +763,7 @@ class Work(unittest.TestCase):
         order = [out.index(x) for x in ("Waiting on the owner:", "Being built or ready:", "To do:", "Standing orders:")]
         self.assertEqual(order, sorted(order))
         self.wk("piece", "note", "acme", "reports", "P2", "--add", "Pat: merge it")  # the newest line is a decision
-        with mock.patch.object(work, "_gh_prs", side_effect=work.WorkkitError("gh: timed out")):
+        with mock.patch.object(work, "_gh_prs", side_effect=work.KitError("gh: timed out")):
             code, out = self.recall(hook | {"source": "resume"})
         self.assertEqual(code, 0)
         self.assertEqual(out.count("Pat: merge it"), 1)  # shown once, as the newest line
@@ -811,8 +811,8 @@ class Work(unittest.TestCase):
         self.assertIn("- P2 building: Portal build number 2", out)  # the second list's builds outrank the first's to-dos
         self.assertIn("portal note 2 ", out)
         self.assertNotIn("reports note 1 ", out)  # to-do notes go first, in every list
-        self.assertIn("more open pieces: wk piece list acme reports", out)
-        self.assertNotIn("more open pieces: wk piece list acme portal", out)
+        self.assertIn("more open pieces: nh piece list acme reports", out)
+        self.assertNotIn("more open pieces: nh piece list acme portal", out)
 
     def test_recall_stays_under_its_cap_trimming_to_do_notes_first(self):
         sid = "local_cccc3333-4444"
@@ -833,7 +833,7 @@ class Work(unittest.TestCase):
         self.assertNotIn("note 3 ", out)  # to-do pieces lost theirs first
         self.assertIn("- P3 todo: Piece number 3", out)
         hidden = next(x for x in out.splitlines() if "more open pieces" in x)
-        self.assertEqual(hidden, f"{200 - out.count(' todo: ') - 2} more open pieces: wk piece list acme reports")
+        self.assertEqual(hidden, f"{200 - out.count(' todo: ') - 2} more open pieces: nh piece list acme reports")
         (d / "pieces.tsv").write_text("\n".join(rows[:9]) + "\n", encoding="utf-8")  # 8 pieces fit with notes
         out = self.recall(hook)[1]
         self.assertIn("note 8 ", out)
@@ -862,7 +862,7 @@ class Work(unittest.TestCase):
                 mock.patch.object(check.usage, "memory", no), mock.patch.object(check, "_facts", no):
             out = self.recall(hook)[1]
         lines = out.splitlines()
-        self.assertIn("To fix (yours, unless marked; wk check acme reports for all):", lines)
+        self.assertIn("To fix (yours, unless marked; nh check acme reports for all):", lines)
         fix = [x for x in lines if x.startswith("- P3: name has") or "(needs the owner's yes)" in x]
         self.assertEqual(len(fix), 3, out)  # P3's name; P2 untouched for a month and the billing file, the owner's
         self.assertTrue(any(x.startswith("- P2 (needs the owner's yes): has been a to-do") for x in fix), out)
@@ -880,10 +880,10 @@ class Work(unittest.TestCase):
         self.assertIn("note 1", out)
         self.assertNotIn(" todo: ", out)  # the to-dos went before the to-fix lines
         lines = out.splitlines()
-        start = lines.index("To fix (yours, unless marked; wk check acme reports for all):")
+        start = lines.index("To fix (yours, unless marked; nh check acme reports for all):")
         more = next(i for i, x in enumerate(lines) if "more to fix" in x)
         self.assertGreater(more - start - 1, 0)  # some to-fix lines still show
-        self.assertEqual(lines[more], f"{3 + 76 - (more - start - 1)} more to fix: wk check acme reports")
+        self.assertEqual(lines[more], f"{3 + 76 - (more - start - 1)} more to fix: nh check acme reports")
 
     def test_recall_is_quiet_in_other_chats_and_never_fails(self):
         self.wk("piece", "add", "acme", "reports", "Aged debt view")
@@ -964,7 +964,7 @@ class Work(unittest.TestCase):
         self.assertIn("2. P2 Aged debt view: start now", out)
         self.assertIn("3. P4 Old idea: waits: after P2, not merged yet", out)
         self.assertIn("4. P5 Login page: waits: no free builder (2 of 2 running)", out)  # P2 took the slot
-        with mock.patch.object(work, "open_pr_files", side_effect=work.WorkkitError("gh: timed out")), \
+        with mock.patch.object(work, "open_pr_files", side_effect=work.KitError("gh: timed out")), \
                 mock.patch.object(work, "turn_rows", return_value=[]):
             out = self.wk("piece", "next", "acme", "reports")[1]
         self.assertIn("P2 Aged debt view: waits: GitHub didn't answer", out)  # unknown is never a start
@@ -992,7 +992,7 @@ class Work(unittest.TestCase):
         self.assertEqual([x["why"] for x in work.queue_plan(rows, None, {}, [])["items"]].count(""), 4)
         self.assertEqual(settings.builders_per_list({"builders_per_list": 3}), 3)
         for bad in (0, "2", True):
-            with self.assertRaises(work.WorkkitError):
+            with self.assertRaises(work.KitError):
                 settings.builders_per_list({"builders_per_list": bad})
 
     def test_recall_shows_the_queue_and_why_each_piece_waits(self):

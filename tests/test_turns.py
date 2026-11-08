@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
+os.environ["NH_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
 
 from wk import cli, core, turns  # noqa: E402
 
@@ -160,7 +160,7 @@ class Turns(unittest.TestCase):
         pr["headRefName"] = "main"
         code, out = refresh()
         self.assertEqual(code, 1)
-        self.assertIn("main checkout, which wk refresh never touches", out)
+        self.assertIn("main checkout, which nh refresh never touches", out)
 
     def test_refresh_refuses_a_full_run_path_and_a_ready_that_is_missing_or_lists_gap_checks(self):
         def commit(where, name, text, push=None):
@@ -285,7 +285,7 @@ class Turns(unittest.TestCase):
         (self.app / ".work").mkdir()
         (self.app / ".work" / "hours.tsv").write_text("date\n", encoding="utf-8")
         sh(self.app, "add", "-A")
-        sh(self.app, "commit", "-q", "-m", "wk: recorded hours")
+        sh(self.app, "commit", "-q", "-m", "nh: recorded hours")
         sh(self.app, "push", "-q", "origin", "main")
         self.assertEqual(self.wk(self.a, "turn", "take", "env", "db")[0], 0)  # only .work/ moved on main
         (self.app / "code.js").write_text("x", encoding="utf-8")
@@ -337,8 +337,12 @@ class Turns(unittest.TestCase):
         self.assertIn(f"head is now {head[:12]}", out)
         code, out = self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "deploy to staging")
         self.assertEqual(code, 1)  # a 6-character SHA is not enough
-        self.assertIn(f"no comment with the line 'Approved by Pat: deploy to staging @ {head[:12]}'", out)
+        self.assertIn(f"no comment with the line 'Approved by the owner: deploy to staging @ {head[:12]}'", out)
         self.assertEqual(self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "ship it")[0], 1)
+        pr["comments"].append({"body": f"Approved by the owner: ship it @ {head[:9]}", "url": "u-ship"})
+        code, out = self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "ship it")
+        self.assertEqual(code, 0)  # the form every approval takes now: no one's name
+        self.assertIn("u-ship", out)
         self.assertEqual(self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "delete data")[0], 1)
         pr["headRefOid"] = "f" * 40  # a later push voids the approval
         self.assertEqual(self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "deploy to production")[0], 1)

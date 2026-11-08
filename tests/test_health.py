@@ -1,4 +1,4 @@
-"""wk health: what it reads from transcripts, counted once each, by period, with versions and verdicts. Every
+"""nh health: what it reads from transcripts, counted once each, by period, with versions and verdicts. Every
 transcript here is a small made-up one (no chat text)."""
 
 import io
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import cli, health  # noqa: E402
 
@@ -154,12 +154,12 @@ class Health(unittest.TestCase):
             rejection("u1", at(-1)), rejection("u2", at(-1, 11)),
             {"type": "user", "uuid": "u3", "timestamp": at(-1),
              "message": {"role": "user", "content": "Stop hook feedback: fine"}},     # not a rejection
-            bash("r1", at(-1), "wk refresh --pr 3"), result("r1", at(-1), "abc123\nrefreshed"),
+            bash("r1", at(-1), "nh refresh --pr 3"), result("r1", at(-1), "abc123\nrefreshed"),
             bash("r2", at(-1), 'py -P -m wk refresh --pr 4'),
             result("r2", at(-1), "Exit code 1\nwk: refused", True),
-            bash("r3", at(-1), "wk refresh --pr 5"),                                   # no result yet
+            bash("r3", at(-1), "nh refresh --pr 5"),                                   # no result yet
             bash("r4", at(-1), "grep -n 'refresh' README.md"),                          # not a use
-            {"type": "api-request-blob", "message": bash("r1", "", "wk refresh --pr 3")["message"]}])  # history, no time
+            {"type": "api-request-blob", "message": bash("r1", "", "nh refresh --pr 3")["message"]}])  # history, no time
         write(folder / "bbbbbbbb-0000-0000-0000-000000000000.jsonl", [rejection("u1", at(-1))])  # a copy
         m = self.period(self.run_(), "yesterday")["measures"]
         self.assertEqual(m["rejections"], 2)
@@ -170,9 +170,9 @@ class Health(unittest.TestCase):
         folder = self.root / "C--Projects-demo"
         write(folder / f"{CHAT}.jsonl", [
             bash("g1", at(-1), 'grep -n "gh pr merge" notes.txt'), result("g1", at(-1), "3: gh pr merge"),
-            bash("g2", at(-1), 'rg "wk refresh" README.md'), result("g2", at(-1), "README.md: wk refresh"),
+            bash("g2", at(-1), 'rg "nh refresh" README.md'), result("g2", at(-1), "README.md: nh refresh"),
             bash("g3", at(-1), "echo gh pr merge 4"), result("g3", at(-1), "gh pr merge 4"),
-            bash("c1", at(-1), "git fetch origin && WORKKIT_AUTO_UPDATE=0 py -P -m wk refresh --pr 3; gh pr merge 5 --merge"),
+            bash("c1", at(-1), "git fetch origin && NH_AUTO_UPDATE=0 py -P -m wk refresh --pr 3; gh pr merge 5 --merge"),
             result("c1", at(-1), "abc123\nrefreshed\nMerged")])
         m = self.period(self.run_(), "yesterday")["measures"]
         self.assertEqual(m["refresh"], 1)

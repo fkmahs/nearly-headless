@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run nearly-headless with this checkout first on the path. Git Bash on Windows has no working python3: use py there.
+# When this laptop's settings name another checkout as its kit (`kit = "..."`, written by nh setup), forward to it,
+# so `nh` from this folder on the PATH runs that one. `nh setup` never forwards: it makes this checkout the kit.
+KIT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -z "$NH_FORWARDED" ] && [ "$1" != "setup" ]; then
+  S="${NH_SETTINGS:-$WORKKIT_SETTINGS}"
+  if [ -z "$S" ]; then
+    S="$HOME/.nearly-headless/settings.toml"
+    [ -d "$HOME/.nearly-headless" ] || S="$HOME/.workkit/settings.toml"  # the folder before 1.56.0, until setup moves it
+  fi
+  if [ -f "$S" ]; then
+    T="$(sed -n -e '/^[[:space:]]*\[/q' -e 's/^kit[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$S" | head -n 1)"
+    if [ -n "$T" ] && [ -f "$T/bin/nh" ] && [ "$(cd "$T" && pwd -P)" != "$(cd "$KIT" && pwd -P)" ]; then
+      NH_FORWARDED="$(cd "$KIT" && (pwd -W 2>/dev/null || pwd))"
+      export NH_FORWARDED
+      exec sh "$T/bin/nh" "$@"
+    fi
+  fi
+fi
+if python3 -c "" 2>/dev/null; then PY=python3; else PY=py; fi
+PYTHONPATH="$KIT${PYTHONPATH:+:$PYTHONPATH}" PYTHONIOENCODING=utf-8 exec "$PY" -P -m wk "$@"

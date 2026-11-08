@@ -16,4 +16,4 @@
 <!-- What's done, what's next, what's open -->
 
 ## Decisions and approvals
-<!-- The supervisor adds: Approved by <owner>: <action> @ <sha> (on a public repo: Approved by the owner: ...) -->
+<!-- The supervisor adds: Approved by the owner: <action> @ <sha> -->

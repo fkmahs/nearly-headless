@@ -1,4 +1,4 @@
-"""wk test: the change -> check map's checks for what a branch changed, never the whole suite."""
+"""nh test: the change -> check map's checks for what a branch changed, never the whole suite."""
 
 import io
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 KIT = Path(__file__).resolve().parents[1]
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import cli, testmap  # noqa: E402
 
@@ -25,7 +25,7 @@ MAP = """# Contributing
 | `tests/test_<name>.py` | `python -m unittest tests.test_<name>` |
 | `toolkits/<kit>/` | `python -m unittest discover -s toolkits/<kit>/tests` |
 | `wk/__init__.py` (version only), `skills/`, `*.md` | none: read the diff |
-| `.github/workflows/`, `tests/test_toolkits.py` (what CI runs; `wk refresh` reads this row) | the full run: `python -m unittest discover -s tests` |
+| `.github/workflows/`, `tests/test_toolkits.py` (what CI runs; `nh refresh` reads this row) | the full run: `python -m unittest discover -s tests` |
 
 ## Next section
 | `ignored.py` | `python -m nothing` |
@@ -37,7 +37,7 @@ class Plan(unittest.TestCase):
 
     def test_the_map_is_read_from_its_own_section(self):
         self.assertEqual([r["kind"] for r in self.rows], ["run", "run", "run", "run", "none", "full"])
-        self.assertEqual(self.rows[-1]["paths"], [".github/workflows/", "tests/test_toolkits.py"])  # not `wk refresh`
+        self.assertEqual(self.rows[-1]["paths"], [".github/workflows/", "tests/test_toolkits.py"])  # not `nh refresh`
         self.assertFalse(any("ignored.py" in r["paths"] for r in self.rows))
 
     def test_each_changed_file_maps_to_its_row_and_commands_run_once(self):
@@ -64,7 +64,7 @@ class Plan(unittest.TestCase):
         self.assertFalse(rx("wk/work.py").match("wk/work.pyc"))
         self.assertEqual(rx("toolkits/<kit>/").match("toolkits/netsuite/a/b.py")["kit"], "netsuite")
 
-    def test_work_kits_own_map_covers_its_files(self):
+    def test_the_kits_own_map_covers_its_files(self):
         rows = testmap.rows_of(KIT)
         files = [p.relative_to(KIT).as_posix() for d in ("wk", "tests", "skills", "templates", "docs")
                  for p in (KIT / d).rglob("*") if p.is_file() and "__pycache__" not in p.parts]
@@ -110,7 +110,7 @@ class Run(unittest.TestCase):
         self.assertNotIn("mapped check ran", out)
         code, out = wk()
         self.assertEqual(code, 0, out)
-        self.assertIn("wk test: passed", out)
+        self.assertIn("nh test: passed", out)
         code, out = wk("ok_check", "--local")  # a named module, here
         self.assertEqual(code, 0, out)
         self.assertIn("mapped check ran", out)
@@ -147,7 +147,7 @@ class Run(unittest.TestCase):
 
 
 class FakeDocker:
-    """docker as wk test calls it: running or not, with or without the image yet, holding the wk-test images in
+    """docker as nh test calls it: running or not, with or without the image yet, holding the wk-test images in
     tags. Records every call."""
     def __init__(self, running=True, image=True, tags=(), starts=False, open_app=False):
         self.running, self.image, self.tags, self.calls = running, image, list(tags), []
@@ -178,7 +178,7 @@ class FakeDocker:
 
 
 class Where(unittest.TestCase):
-    """Where wk test runs its checks: off Linux with a wk-test.Dockerfile, only in a Linux container (starting Docker
+    """Where nh test runs its checks: off Linux with a wk-test.Dockerfile, only in a Linux container (starting Docker
     Desktop when it's off); with --local, on Linux or without the file, here."""
     def setUp(self):
         self.top = Path(tempfile.mkdtemp())
@@ -244,7 +244,7 @@ class Where(unittest.TestCase):
             self.where(docker)
         self.assertEqual(docker.launched, [])
         self.assertEqual(str(stop.exception),
-                         "Docker isn't running and couldn't be started: start Docker Desktop, then run wk test again")
+                         "Docker isn't running and couldn't be started: start Docker Desktop, then run nh test again")
         self.assertGreaterEqual(self.clock, testmap.WAIT)  # waited the whole two minutes
         self.assertLess(self.clock, testmap.WAIT + 5)
         self.assertNotIn("run", [c[1] for c in docker.calls if c[0] == "docker"])  # no test ran
@@ -269,7 +269,7 @@ class Where(unittest.TestCase):
         with self.assertRaises(testmap.DockerNeeded) as stop:
             self.where(FakeDocker(), installed=False)
         self.assertEqual(str(stop.exception), "Docker isn't installed: winget install Docker.DockerDesktop, open it "
-                                              "once, then run wk test again")
+                                              "once, then run nh test again")
         with self.assertRaises(testmap.DockerNeeded) as stop:
             self.where(FakeDocker(), platform="darwin", installed=False)
         self.assertIn("brew install --cask docker", str(stop.exception))
@@ -286,7 +286,7 @@ class Where(unittest.TestCase):
         with self.assertRaises(testmap.ImageFailed) as stop:
             self.where(failing)
         self.assertEqual(str(stop.exception), "the Linux image didn't build (ERROR: failed to solve: no such image): "
-                                              f"fix {testmap.DOCKERFILE}, then run wk test again")
+                                              f"fix {testmap.DOCKERFILE}, then run nh test again")
         self.assertEqual(stop.exception.code, testmap.IMAGE_FAILED)
         self.assertNotIn(testmap.IMAGE_FAILED, (0, 1, 2, testmap.DOCKER_NEEDED))
         self.assertNotIn("run", [c[1] for c in docker.calls])  # no check ran, here or in a container
@@ -295,7 +295,7 @@ class Where(unittest.TestCase):
         (self.top / testmap.DOCKERFILE).unlink()
         docker = FakeDocker(running=False)
         (tag, why), _ = self.where(docker)
-        self.assertEqual((tag, why), (None, f"wk test: running here: this repo has no {testmap.DOCKERFILE}"))
+        self.assertEqual((tag, why), (None, f"nh test: running here: this repo has no {testmap.DOCKERFILE}"))
         self.assertEqual(docker.calls, [])
 
     def test_wk_test_stops_before_any_check_with_its_own_exit_code(self):
@@ -307,7 +307,7 @@ class Where(unittest.TestCase):
 
         def stopped(top, local):
             raise testmap.DockerNeeded("Docker isn't running and couldn't be started: start Docker Desktop, then "
-                                       "run wk test again")
+                                       "run nh test again")
         def run(argv, *a, **k):  # git still works; any other command would be a check running
             if argv[0] != "git":
                 ran.append(argv)
@@ -320,12 +320,12 @@ class Where(unittest.TestCase):
             testmap.where, testmap.core.run = real
         self.assertEqual((code, ran), (testmap.DOCKER_NEEDED, []))
         self.assertNotIn(code, (0, 1, 2))  # not a pass, a test failure or an error
-        self.assertEqual(tail, "wk test: Docker isn't running and couldn't be started: start Docker Desktop, then "
-                               "run wk test again")
+        self.assertEqual(tail, "nh test: Docker isn't running and couldn't be started: start Docker Desktop, then "
+                               "run nh test again")
 
     def test_local_forces_here_and_linux_changes_nothing(self):
         docker = FakeDocker(running=False)  # Docker off: neither starts it
-        self.assertEqual(self.where(docker, local=True)[0], (None, "wk test: running here (--local)"))
+        self.assertEqual(self.where(docker, local=True)[0], (None, "nh test: running here (--local)"))
         self.assertEqual(self.where(docker, platform="linux")[0], (None, ""))
         self.assertEqual(docker.calls, [])
 

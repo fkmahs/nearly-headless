@@ -1,4 +1,4 @@
-"""The command center's work-kit page: every part of work-kit on this laptop and how the parts connect, read from what
+"""The command center's nearly-headless page: every part of nearly-headless on this laptop and how the parts connect, read from what
 is really here, so the page never goes stale:
 
 hooks     the Claude Code hooks setup writes (upkeep.HOOKS), each checked in ~/.claude/settings.json (read-only)
@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 
 from . import __version__, core, reply, settings, upkeep
-from .core import WorkkitError
+from .core import KitError
 
 KIT = upkeep.KIT
 
@@ -37,13 +37,13 @@ ROLES = {
     "builder": ("Builder", "Does one piece in its own copy of the repo", ("skill", "builder"), ["pr"]),
     "pr": ("Pull request", "One per piece: the change and its record", ("template", "templates/pull_request_template.md"),
            ["reviewer"]),
-    "refresh": ("wk refresh", "Brings a waiting PR up to date with main", ("command", "refresh"), ["pr"]),
+    "refresh": ("nh refresh", "Brings a waiting PR up to date with main", ("command", "refresh"), ["pr"]),
     "reviewer": ("Reviewer", "Two fresh reads of the change before you see it",
                  ("section", "skills/supervisor/merge.md", "Before the yes"), ["release"]),
     "release": ("Merge & release", "Only on your yes: merge, tag, update the laptop",
                 ("section", "skills/supervisor/merge.md", "Releasing"), []),
     "lists": ("Lists in each repo", "The memory: pieces, notes, decisions, hours", ("command", "piece"), ["check"]),
-    "check": ("wk check", "Checks every list against GitHub and the rules", ("command", "check"), ["cc"]),
+    "check": ("nh check", "Checks every list against GitHub and the rules", ("command", "check"), ["cc"]),
     "cc": ("Command center", "This page: reads the lists for you", ("command", "serve"), ["you"]),
 }
 
@@ -120,7 +120,7 @@ def _detail(source, commands: dict) -> tuple[str | None, str]:
     if kind == "template":
         heads = re.findall(r"^##\s+(.+)$", _text(KIT / where[0]) or "", re.MULTILINE)
         return ("Its sections: " + ", ".join(heads) + ".") if heads else None, where[0]
-    return commands.get(where[0]) or None, f"wk {where[0]}"
+    return commands.get(where[0]) or None, f"nh {where[0]}"
 
 
 def hooks(s: dict) -> list[dict]:
@@ -129,10 +129,10 @@ def hooks(s: dict) -> list[dict]:
     s_path, parts, checks = upkeep.claude_dir() / "settings.json", reply.required(s), reply_checks(s)
     out = []
     for spec in upkeep.HOOKS:
-        when, what = HOOK_WORDS.get(spec, (f"{spec[0]} {spec[1] or ''}".strip(), f"Runs wk {spec[2]}"))
+        when, what = HOOK_WORDS.get(spec, (f"{spec[0]} {spec[1] or ''}".strip(), f"Runs nh {spec[2]}"))
         mine = checks if spec == upkeep.REPLY else []
         idle = (spec == upkeep.REMIND and not parts) or (spec == upkeep.REPLY and not any(c["on"] for c in checks))
-        out.append({"event": spec[0], "matcher": spec[1] or "", "command": f"wk {spec[2]}", "when": when,
+        out.append({"event": spec[0], "matcher": spec[1] or "", "command": f"nh {spec[2]}", "when": when,
                     "what": what, "on": upkeep.hook_installed(spec), "idle": idle, "checks": mine,
                     "file": core.posix(s_path)})
     return out
@@ -153,14 +153,14 @@ def laptop_settings(s: dict) -> list[dict]:
     try:
         limit = settings.builders_per_list(s)
         builders = "No limit" if limit is None else f"{limit} at a time"
-    except WorkkitError as exc:
+    except KitError as exc:
         builders = f"Can't be read: {exc}"
     parts = reply.required(s)
     claude = upkeep.claude_dir() / "settings.json"
     try:
         window = upkeep._setting(claude, upkeep.WINDOW)[1]
         push = upkeep._setting(claude, upkeep.PUSH)[1]
-    except WorkkitError:
+    except KitError:
         window = push = "can't be read"
     return [
         {"name": "Builders per list", "value": builders, "where": "builders_per_list in the settings file",

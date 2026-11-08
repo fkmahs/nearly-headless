@@ -1,16 +1,16 @@
 """Files that never go to GitHub: spreadsheets, client documents, archives and Office lock files (PATTERNS), and any
-other binary file outside docs/, where design images are allowed. One rule for every repo, owned by work-kit.
+other binary file outside docs/, where design images are allowed. One rule for every repo, owned by nearly-headless.
 
-Stop at the source: `wk setup` (and so `wk update`) writes PATTERNS into each repo's local git exclude file, in the
+Stop at the source: `nh setup` (and so `nh update`) writes PATTERNS into each repo's local git exclude file, in the
 Git folder its worktrees share, inside a marked block. Git then never offers those files to add, and nothing is
 committed to the repo. The owner's own lines in that file are never touched.
 
-Catch the rest: `wk check` reports every file on the base branch (as GitHub has it) that matches PATTERNS, or that
+Catch the rest: `nh check` reports every file on the base branch (as GitHub has it) that matches PATTERNS, or that
 git itself counts as binary outside docs/, with the command that takes it out of git and keeps the local copy. It
 never deletes anything. An image a deliberate visual test uses may stay, one file at a time, on the owner's yes
-(`wk check <repo> --ack file:<path>`).
+(`nh check <repo> --ack file:<path>`).
 
-One exception is work-kit's own, in the check only: invoices the invoicing toolkit made before 1.30 keep their frozen
+One exception is the kit's own, in the check only: invoices the invoicing toolkit made before 1.30 keep their frozen
 statement as billing/<ID>.csv (BILLING), already in git and never rewritten, so the check doesn't flag them. Since 1.30
 the statement is the readable billing/<ID>.md alone, so the exclude block keeps every new .csv out, billing/ included.
 
@@ -26,14 +26,15 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from . import core
-from .core import WorkkitError
+from .core import KitError
 
 PATTERNS = ("*.xlsx", "*.xls", "*.xlsm", "*.xlsb", "*.csv", "*.pdf", "*.docx", "*.doc", "*.pptx", "*.zip", "~$*")
 BILLING = "billing/*.csv"  # statements of invoices made before 1.30 (toolkits/invoicing), already in git
 IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp")  # a flagged image may be allowed one by one
 DOCS = "docs/"  # binaries here (design images) belong in GitHub
-START = "# work-kit: files that never go to GitHub. wk setup keeps this block; add your own lines outside it."
-END = "# end of work-kit's block"
+START = "# nearly-headless: files that never go to GitHub. nh setup keeps this block; add your own lines outside it."
+END = "# end of the kit's block"
+OLD = ("# work-kit:", "# end of work-kit's block")  # the block as releases before 1.56.0 wrote it: replaced, never doubled
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree, to diff every file against
 
 
@@ -47,14 +48,14 @@ def _block() -> list[str]:
 
 
 def _with_block(text: str) -> str:
-    """The exclude file with work-kit's block current: replaced where it is (from any release), else added at the
+    """The exclude file with the kit's block current: replaced where it is (from any release), else added at the
     end. A block is a start line and the first end line before the next start; a start with no end is left as it
     is, so a later run never swallows the owner's lines. Every other line stays as it was."""
     lines = text.splitlines()
-    starts = [i for i, x in enumerate(lines) if x.startswith("# work-kit:")]
+    starts = [i for i, x in enumerate(lines) if x.startswith(("# nearly-headless:", OLD[0]))]
     for n, start in enumerate(starts):
         stop = starts[n + 1] if n + 1 < len(starts) else len(lines)
-        end = next((i for i in range(start + 1, stop) if lines[i] == END), None)
+        end = next((i for i in range(start + 1, stop) if lines[i] in (END, OLD[1])), None)
         if end is not None:
             lines[start:end + 1] = _block()
             break
@@ -64,29 +65,29 @@ def _with_block(text: str) -> str:
 
 
 def _read(path: Path) -> str:
-    """The exclude file's text; WorkkitError when it isn't UTF-8, so it is never rewritten with characters lost."""
+    """The exclude file's text; KitError when it isn't UTF-8, so it is never rewritten with characters lost."""
     try:
         return path.read_bytes().decode("utf-8") if path.is_file() else ""
     except UnicodeDecodeError as exc:
-        raise WorkkitError(f"{core.posix(path)} is not UTF-8 text; left as it is. Add work-kit's block by hand "
-                           "(wk/keepout.py) or save the file as UTF-8, then run wk setup") from exc
+        raise KitError(f"{core.posix(path)} is not UTF-8 text; left as it is. Add the kit's block by hand "
+                           "(wk/keepout.py) or save the file as UTF-8, then run nh setup") from exc
 
 
 def installed(top: Path) -> bool:
     try:
         text = _read(exclude_file(top))
-    except WorkkitError:
+    except KitError:
         return False
     return "\n".join(_block()) in "\n".join(text.splitlines())
 
 
 def install(top: Path) -> dict:
-    """Write or refresh work-kit's block in the repo's exclude file; nothing changes when it is already current, and a
+    """Write or refresh the kit's block in the repo's exclude file; nothing changes when it is already current, and a
     file that can't be read as UTF-8 is never rewritten."""
     path = exclude_file(top)
     try:
         text = _read(path)
-    except WorkkitError as exc:
+    except KitError as exc:
         return {"installed": False, "file": core.posix(path), "why": str(exc)}
     new = _with_block(text)
     if new.splitlines() == text.splitlines():
@@ -102,7 +103,7 @@ def _billing(path: str) -> bool:
 
 def tracked(top: Path, ref: str) -> list[tuple[str, str]]:
     """Files at ref that don't belong in GitHub, with why: matching PATTERNS (any folder; older invoice statements aside),
-    or binary outside docs/. WorkkitError when git can't list them (no such branch, or git stuck)."""
+    or binary outside docs/. KitError when git can't list them (no such branch, or git stuck)."""
     out = core.git(top, "-c", "core.quotepath=false", "diff", "--numstat", "-z", "--no-renames", "--no-textconv",
                    "--no-ext-diff", EMPTY_TREE, ref)
     found = []

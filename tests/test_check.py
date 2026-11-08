@@ -1,4 +1,4 @@
-"""wk check: every list against GitHub (a fake gh, a bare origin) and the rules; its two writes; and the record rules
+"""nh check: every list against GitHub (a fake gh, a bare origin) and the rules; its two writes; and the record rules
 that keep lists clean (typed dates, merged without a PR, questions tied to a piece)."""
 
 import io
@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import check, cli, core, dashboard, settings, work  # noqa: E402
 
@@ -77,7 +77,7 @@ class Check(unittest.TestCase):
         return check.check(self.s, "acme", product)
 
     def rows(self, **change):
-        """Write the pieces file directly: older work-kits allowed what this one refuses."""
+        """Write the pieces file directly: older releases allowed what this one refuses."""
         path = self.app / ".work" / "reports" / "pieces.tsv"
         rows = work._read_tsv(path, work.PIECE_COLUMNS)
         rows[0].update(change)
@@ -112,7 +112,7 @@ class Check(unittest.TestCase):
         # a finished piece's note is history: its tidiness is not reported; its other problems still are
         self.rows(state="merged", chat="")
         code, out = self.wk("check", "acme", "reports")
-        self.assertIn("acme reports P1: is merged but has no PR. Fix: wk piece set acme reports P1 --state done",
+        self.assertIn("acme reports P1: is merged but has no PR. Fix: nh piece set acme reports P1 --state done",
                       out.splitlines())
         self.assertNotIn("note", [p["kind"] for p in self.found()])
         note.rename(note.with_suffix(".gone"))
@@ -191,7 +191,7 @@ class Check(unittest.TestCase):
         self.prs = [{"number": 6, "state": "OPEN", "headRefName": "orphan-pr"}]
         self.assertEqual([check.line(p) for p in self.found("reports")], [
             "acme repo-wide (for reports) PR #6: is open on orphan-pr but no piece records it. "
-            "Fix: wk piece set acme <list> <id> --pr 6 --branch orphan-pr"])
+            "Fix: nh piece set acme <list> <id> --pr 6 --branch orphan-pr"])
         self.wk("product", "add", "acme", "portal", "--line", "The customer portal")
         self.assertEqual(self.found("portal")[0]["owner"], "")  # two lists, neither supervised: unclear, both see it
         self.wk("product", "set", "acme", "portal", "--supervisor", "claude://x")
@@ -272,6 +272,30 @@ class Check(unittest.TestCase):
         self.assertEqual([p for p in self.found() if p["kind"] == "main"], [])
         self.assertIn(sha, sh(self.origin, "show", "main:.work/acknowledged.tsv"))
 
+    def test_a_list_kept_in_its_own_checkout_gets_the_same_main_branch_audit(self):
+        lorigin, lst = self.tmp / "list-origin.git", self.tmp / "list"
+        subprocess.run(["git", "init", "--bare", "-b", "main", str(lorigin)], check=True, capture_output=True)
+        subprocess.run(["git", "clone", "-q", str(lorigin), str(lst)], check=True, capture_output=True)
+        for args in (("config", "user.name", "t"), ("config", "user.email", "t@example.org"),
+                     ("commit", "-q", "--allow-empty", "-m", "init"), ("push", "-q", "origin", "HEAD:main")):
+            sh(lst, *args)
+        self.settings.write_text(f'owner = "Pat Lee"\n\n[repos.acme]\npath = "{core.posix(self.app)}"\n'
+                                 f'list = "{core.posix(lst)}"\n', encoding="utf-8")
+        self.s = settings.load(self.settings)
+        self.wk("product", "add", "acme", "ops", "--line", "Ops")
+        self.wk("piece", "add", "acme", "ops", "Tidy the exports")  # records only: never flagged
+        self.assertEqual([p for p in self.found() if p["kind"] == "main"], [])
+        (lst / "tool.py").write_text("x\n", encoding="utf-8")
+        sh(lst, "add", "-A")
+        sh(lst, "commit", "-q", "-m", "code in the list repo")
+        sh(lst, "push", "-q", "origin", "main")
+        sha = sh(lst, "rev-parse", "HEAD")
+        main = [p for p in self.found() if p["kind"] == "main"]
+        self.assertEqual([p["item"] for p in main], [sha[:7]])
+        self.assertIn(f"of its list ({core.posix(lst)}) without a PR: code in the list repo", main[0]["what"])
+        self.assertEqual(self.wk("check", "acme", "--ack", sha[:9], "--reason", "Owner: fine")[0], 0)
+        self.assertEqual([p for p in self.found() if p["kind"] == "main"], [])
+
     def test_a_parked_lists_findings_wait_for_a_supervisor_and_count_nowhere(self):
         (self.app / ".work" / "reports" / "notes" / "P1.md").unlink()  # an open piece's finding: has no note
         (self.app / "code.js").write_text("changed\n", encoding="utf-8")
@@ -329,7 +353,7 @@ class Check(unittest.TestCase):
     def test_merged_needs_a_pr(self):
         code, out = self.wk("piece", "set", "acme", "reports", "P1", "--state", "merged")
         self.assertEqual(code, 2)
-        self.assertIn("wk piece set acme reports P1 --state done", out)
+        self.assertIn("nh piece set acme reports P1 --state done", out)
         self.assertEqual(self.wk("piece", "set", "acme", "reports", "P1", "--state", "merged", "--pr", "4")[0], 0)
 
     def test_every_question_names_its_piece_or_the_whole_list(self):
@@ -340,12 +364,12 @@ class Check(unittest.TestCase):
         self.assertEqual(self.wk("question", "add", "acme", "reports", "Hire a second reviewer?", "--list-wide")[0], 0)
         path = self.app / ".work" / "reports" / "questions.md"
         self.assertIn("- Scope: whole list", path.read_text(encoding="utf-8"))
-        # one written by an older work-kit names no piece: wk check flags it, and wk question set ties it to one
+        # one written by an older nearly-headless names no piece: nh check flags it, and nh question set ties it to one
         path.write_text(path.read_text(encoding="utf-8") + "## Q2 · Start a builder on the export?\n- Asked: "
                         f"{TODAY}\n", encoding="utf-8")
         found = [p for p in self.found() if p["kind"] == "question"]
         self.assertEqual([(p["item"], p["what"]) for p in found], [("Q2", "isn't tied to a piece yet")])
-        self.assertIn("wk question set acme reports Q2 --piece", found[0]["fix"])
+        self.assertIn("nh question set acme reports Q2 --piece", found[0]["fix"])
         self.assertEqual(self.wk("question", "set", "acme", "reports", "Q2")[0], 2)  # needs --piece
         self.assertEqual(self.wk("question", "set", "acme", "reports", "Q9", "--piece", "P1")[0], 2)  # no such question
         self.assertEqual(self.wk("question", "set", "acme", "reports", "Q2", "--piece", "P9")[0], 2)  # no such piece
@@ -369,7 +393,7 @@ class Check(unittest.TestCase):
         path = self.app / ".work" / "reports" / "questions.md"
         path.write_text(path.read_text(encoding="utf-8").replace(f"Asked: {TODAY}", "Asked: 2026-01-01"), encoding="utf-8")
         code, out = self.wk("check", "acme", "reports")
-        self.assertEqual(code, 0, out)  # only a reminder: wk check finds no problem
+        self.assertEqual(code, 0, out)  # only a reminder: nh check finds no problem
         self.assertIn("No problems found\nReminders (not problems):\nacme reports Q1: has waited", out)
         view = dashboard.overview(self.s)
         self.assertEqual(view["repos"][0]["products"][0]["fixes"], [])  # nothing red on the page
@@ -413,7 +437,7 @@ class Check(unittest.TestCase):
             self.runs = found
             self.assertEqual(tests(), expected, found)
         self.runs = [self.run_(5, "main", "failure", workflow="tests")]
-        self.assertEqual(tests(), [])  # read a moment ago: wk check waits for its next read
+        self.assertEqual(tests(), [])  # read a moment ago: nh check waits for its next read
         check._runs.update({k: (v[0] - check.FRESH - 1, v[1]) for k, v in check._runs.items()})
         self.assertEqual(tests(fetch=True), ["main"])  # Check GitHub now reads afresh
         # on the page: the "CI failing" alert gives way to the finding, but only when there is one
@@ -616,7 +640,7 @@ class Check(unittest.TestCase):
         self.assertEqual(note.read_text(encoding="utf-8"), before)
         self.assertEqual(self.wk("piece", "note", "acme", "reports", "P1", "--add", fits)[0], 0)
         self.assertEqual(check.long_lines(note.read_text(encoding="utf-8")), 0)
-        self.assertEqual(self.found(), [])  # what wk wrote, wk check passes
+        self.assertEqual(self.found(), [])  # what wk wrote, nh check passes
 
     def test_fix_makes_only_the_mechanical_fixes(self):
         self.wk("piece", "add", "acme", "reports", "Second piece")

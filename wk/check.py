@@ -1,4 +1,4 @@
-"""`wk check`: every list checked against GitHub and against work-kit's rules, read-only, one line per problem with
+"""`nh check`: every list checked against GitHub and against the kit's rules, read-only, one line per problem with
 the command that fixes it. Supervisors run it when they start or resume and before every catch-up; the command
 center shows the count per list, and code that reached the base branch without a PR as a red alert.
 
@@ -7,17 +7,17 @@ names), open pieces' notes (missing, no brief, dates wk can't read or that are d
 (stale, PR closed, piece finished, leading with a piece id), unbilled hours (naming no piece or a missing one), the
 billing file's coverage_from, each list's supervisor chat and builders that lately went past Claude's compact window
 (usage.py), leftover branches, files on the base branch that don't belong in GitHub (keepout.py), and
-commits on the base branch since the repo took up work-kit that came neither through a merged PR nor touch only
+commits on the base branch since the repo took up nearly-headless that came neither through a merged PR nor touch only
 `.work/` and the invoicing toolkit's files in `billing/` (it commits those itself). And the setup's health:
 tests failing on the base branch or on a PR waiting for the owner's yes, a PR waiting for the owner's yes whose
-files the base branch has changed since the PR's branch last took it (wk gate fresh refuses its merge), committed files that look like they hold a
+files the base branch has changed since the PR's branch last took it (nh gate fresh refuses its merge), committed files that look like they hold a
 key, token or password (git grep, once per commit), to-dos untouched for TODO_DAYS, instruction files over their word
 budget (WORD_BUDGET), and open pieces with near-identical names. GitHub is asked three times per repo: its PRs, its
 branches, and its CI runs (shared with the page's CI status, at most once per RUNS_EVERY); git fetches a waiting PR's
 commits only when this laptop lacks them. Nothing is written, except by `--fix-dates` (opt-in, one list), `--ack` (one commit,
 on the owner's word) and `--fix` (the mechanical findings only, see fix), all through the repo's usual lock, commit and
-push. The rules a write can keep (name_problems, long_lines) live here once: wk piece refuses what they flag, and
-`wk recall` shows a list's other findings that need no network (at_start).
+push. The rules a write can keep (name_problems, long_lines) live here once: nh piece refuses what they flag, and
+`nh recall` shows a list's other findings that need no network (at_start).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from datetime import date
 from pathlib import Path
 
 from . import core, keepout, settings, turns, usage, work
-from .core import WorkkitError
+from .core import KitError
 
 STALE_DAYS = 2      # a question older than this gets a reminder (not a problem: the page shows its age instead)
 NOTE_BYTES = 8192   # a note bigger than this costs every reread
@@ -63,7 +63,7 @@ WORD_BUDGET = {"skill": 1500, "reference": 1000, "instructions": 1500}
 SKILL_DIRS = ("skills", ".claude/skills")  # where a repo keeps its skills, each <dir>/<name>/SKILL.md
 ALIKE = 0.6         # two open pieces whose names share this much of their words, two words at least, look alike
 FILLER = {"a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "with", "by", "from", "at", "is", "it", "its"}
-RUNS_EVERY = 300.0  # seconds between reads of a repo's CI runs, shared by wk check and the page's CI status
+RUNS_EVERY = 300.0  # seconds between reads of a repo's CI runs, shared by nh check and the page's CI status
 FRESH = 15.0        # ...and how recent a read Check GitHub now takes as fresh, so check and page share one
 # workflows that clearly run no tests; every other workflow, named or not, counts as tests
 NOT_TESTS = re.compile(r"(?i)deploy|release|publish|\bpages\b|label|\bstale\b|greet|welcome|triage|auto-?merge"
@@ -119,7 +119,7 @@ KINDS = {
     "files": ("Files that shouldn't be on GitHub", "Files that don't belong in the repo are stored in it.", "supervisor"),
     "main": ("Changes without a pull request", "Code reached the main branch without going through a pull request.",
              "owner"),
-    "repo": ("Settings", "work-kit couldn't read this repo's settings.", "supervisor"),
+    "repo": ("Settings", "nearly-headless couldn't read this repo's settings.", "supervisor"),
     "tests": ("Tests failing", "GitHub's tests failed on the main branch, or on a pull request waiting for your yes.",
               "supervisor"),
     "behind": ("Needs the latest main", "A pull request waiting for your yes lacks main's newest changes to files it "
@@ -218,13 +218,13 @@ def _note_problems(text: str, today: date) -> list[str]:
 
 
 def long_lines(text: str) -> int:
-    """A note's lines over LINE_CHARS, every line counted (a byte-order mark dropped): wk check reports them, and wk
+    """A note's lines over LINE_CHARS, every line counted (a byte-order mark dropped): nh check reports them, and wk
     piece note refuses a note or line that has one."""
     return sum(len(x) > LINE_CHARS for x in text.lstrip("\ufeff").splitlines())
 
 
 def name_problems(name: str) -> list[str]:
-    """What is wrong with a piece's name ("9 words", "a ticket number", "a file name"): wk check reports it, and wk
+    """What is wrong with a piece's name ("9 words", "a ticket number", "a file name"): nh check reports it, and wk
     piece add and set --name refuse it."""
     words, why = len(name.split()), []
     if words > WORDS:
@@ -248,13 +248,13 @@ def _has_brief(text: str) -> bool:
 def _gh(cwd: Path, *args: str) -> str:
     result = core.run(["gh", *args], 60, cwd=str(cwd))
     if result.returncode:
-        raise WorkkitError("gh: " + (result.stderr.strip() or "failed"))
+        raise KitError("gh: " + (result.stderr.strip() or "failed"))
     return result.stdout
 
 
 def _facts(top: Path, base: str, gh, fetch: bool = False, fetched: Future | None = None) -> dict:
     """What GitHub and git say about a repo: its PRs (any state), its branches on GitHub (None when unknown) and here,
-    the working folders in use, and the base branch's history since the repo took up work-kit (for unreviewed).
+    the working folders in use, and the base branch's history since the repo took up nearly-headless (for unreviewed).
     Speed: the three questions to GitHub and the history are asked at the same time; `fetched` is a git fetch still
     running, which only what reads the fetched branches waits for."""
     facts = {"prs": None, "remote": None, "error": [], "top": top, "gh": gh, "base": base, "refs": {}}
@@ -275,11 +275,11 @@ def _facts(top: Path, base: str, gh, fetch: bool = False, fetched: Future | None
     try:
         prs = json.loads(prs_job.result() or "[]")
         facts["prs"] = {str(p["number"]): p | {"state": p.get("state") or "OPEN"} for p in prs if isinstance(p, dict)}
-    except (WorkkitError, ValueError, KeyError, TypeError, OSError) as exc:
+    except (KitError, ValueError, KeyError, TypeError, OSError) as exc:
         facts["error"].append(f"GitHub's PRs could not be read ({exc})")
     try:
         facts["runs"] = runs_job.result()
-    except (WorkkitError, ValueError, KeyError, TypeError, OSError) as exc:
+    except (KitError, ValueError, KeyError, TypeError, OSError) as exc:
         facts["runs"] = None
         facts["error"].append(f"GitHub's test runs could not be read ({exc})")
     if heads_job is not None:
@@ -311,7 +311,7 @@ _began: dict[str, str] = {}  # repo folder -> the commit that first added its pr
 
 
 def _adopted(top: Path, ref: str) -> str:
-    """The commit on `ref` that first added the repo's products.toml, or "" before the repo took up work-kit. Looking
+    """The commit on `ref` that first added the repo's products.toml, or "" before the repo took up nearly-headless. Looking
     it up walks the whole history, so it is remembered per repo while it is still on `ref` (one quick git call)."""
     key = core.posix(top)
     kept = _began.get(key)
@@ -324,7 +324,7 @@ def _adopted(top: Path, ref: str) -> str:
 
 
 def _history(top: Path, ref: str) -> str:
-    """The base branch's own line of commits since the repo took up work-kit, each with the files it changed against
+    """The base branch's own line of commits since the repo took up nearly-headless, each with the files it changed against
     the one before, in one git call; "" before it took it up."""
     began = _adopted(top, ref)
     return core.git(top, "log", "--first-parent", "--diff-merges=first-parent", "--name-only",
@@ -333,7 +333,7 @@ def _history(top: Path, ref: str) -> str:
 
 def unreviewed(top: Path, base: str, prs: dict | None, acked: set[str] = frozenset(),
                history: str | None = None) -> list[dict]:
-    """Commits on the base branch (as GitHub has it), since the repo took up work-kit, that came neither through a
+    """Commits on the base branch (as GitHub has it), since the repo took up nearly-headless, that came neither through a
     merged PR nor touch only `.work/` and the invoicing toolkit's files in `billing/` (BILLING), and that the
     owner hasn't acknowledged. `history` is _history's answer when it was read already."""
     out = _history(top, _ref(top, base)) if history is None else history
@@ -371,7 +371,7 @@ def behind(top: Path, base: str, pr: str, head: str, refs: dict | None = None) -
             if not (tip and turns.has_commit(top, head, pr)):
                 return None
             _behind[key] = turns.changed_on_both(top, head, ref)
-        except WorkkitError:
+        except KitError:
             return None
     return _behind[key]
 
@@ -431,7 +431,7 @@ def failed_run(top: Path, found: list[dict] | None, branch: str, gh, sha: str = 
         try:
             if never_started(top, run, gh):
                 continue
-        except (WorkkitError, ValueError, KeyError, TypeError, OSError):
+        except (KitError, ValueError, KeyError, TypeError, OSError):
             pass
         return run
     return None
@@ -518,10 +518,10 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
     rows = work._read_tsv(d / "pieces.tsv", work.PIECE_COLUMNS)
     prs, remote = facts["prs"], facts["remote"]
     claimed = set()
-    set_ = f"wk piece set {name} {product}"
+    set_ = f"nh piece set {name} {product}"
     names = {x["id"]: x["piece"] for x in rows}
 
-    def add(kind, item, what, fix, auto=None):  # auto: the mechanical change wk check --fix makes
+    def add(kind, item, what, fix, auto=None):  # auto: the mechanical change nh check --fix makes
         found.append(_problem(kind, name, product, item, what, fix, names.get(item, ""))
                      | ({"auto": auto} if auto else {}))
 
@@ -581,7 +581,7 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
                     + ", ".join(both[:5]) + (f" and {len(both) - 5} more" if len(both) > 5 else "")
                     + f", which PR #{n} also changes",
                     f"before asking the owner, its builder takes {into}, re-runs its tests (and sandbox "
-                    f"screenshots, where the repo has them) and posts a new Ready comment; wk gate fresh --pr {n} "
+                    f"screenshots, where the repo has them) and posts a new Ready comment; nh gate fresh --pr {n} "
                     "refuses the merge until then")
         if st == "building" and not x["chat"].startswith("agent:"):
             add("state", pid, "is building but records no builder agent", f"{set_} {pid} --chat agent:<its name>")
@@ -595,37 +595,37 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
             continue
         path = d / "notes" / f"{pid}.md"
         if not path.is_file():
-            add("note", pid, "has no note", f"wk piece note {name} {product} {pid} --file <brief.md>")
+            add("note", pid, "has no note", f"nh piece note {name} {product} {pid} --file <brief.md>")
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         touched = max(filter(None, [_date(x["updated"])] + [_date(m[1]) for m in map(work.DATED.match, text.splitlines())
                                                              if m]), default=None)
         if st == "todo" and touched and (today - touched).days >= TODO_DAYS:
             add("stale", pid, f"has been a to-do with no change or note line for {(today - touched).days} days",
-                f"ask the owner: start it, park it (wk piece note {name} {product} {pid} --add \"Parked: <why>\") or "
+                f"ask the owner: start it, park it (nh piece note {name} {product} {pid} --add \"Parked: <why>\") or "
                 f"drop it ({set_} {pid} --state dropped)")
         if is_open and not _has_brief(text):
             add("note", pid, "note has no brief before its first dated line",
-                f"wk piece note {name} {product} {pid} --file <note with the brief on top>")
+                f"nh piece note {name} {product} {pid} --file <note with the brief on top>")
         for what in _note_problems(text, today):
             # only a person knows the right date, or what a long line comes down to
             by_hand = "correct the dates" if "future" in what else "shorten them (detail goes in the PR)" \
                 if "characters" in what else ""
-            add("note", pid, what, f"{by_hand}: wk piece note {name} {product} {pid} --file <note>" if by_hand
-                else f"wk check {name} {product} --fix-dates")
+            add("note", pid, what, f"{by_hand}: nh piece note {name} {product} {pid} --file <note>" if by_hand
+                else f"nh check {name} {product} --fix-dates")
         if len(text.encode("utf-8")) > NOTE_BYTES:
             add("note", pid, f"note is {len(text.encode('utf-8')) // 1024} KB (over {NOTE_BYTES // 1024})",
-                f"rewrite it to the brief, outcome, decisions and links: wk piece note {name} {product} {pid} --file <note>")
+                f"rewrite it to the brief, outcome, decisions and links: nh piece note {name} {product} {pid} --file <note>")
     # questions
     by_id = {x["id"].upper(): x for x in rows}
     for q in work._read_questions(d / "questions.md"):
-        qid, answer = q["id"], f"wk question answer {name} {product} {q['id']} \"<the owner's answer>\""
+        qid, answer = q["id"], f"nh question answer {name} {product} {q['id']} \"<the owner's answer>\""
         asked = _date(q.get("asked", ""))
         if asked and (today - asked).days > STALE_DAYS:
             add("reminder", qid, f"has waited {(today - asked).days} days", f"ask the owner again, or close it: {answer}")
         if not q.get("piece") and q.get("scope") != work.LIST_WIDE:
             add("question", qid, "isn't tied to a piece yet",
-                f"wk question set {name} {product} {qid} --piece <the piece it is about> (or --list-wide when it "
+                f"nh question set {name} {product} {qid} --piece <the piece it is about> (or --list-wide when it "
                 f"is about the whole list)")
         for n in _numbers(q.get("pr", "")) if prs is not None else []:
             if n in prs and prs[n]["state"] != "OPEN":
@@ -635,7 +635,7 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
             add("question", qid, f"is about {piece['id']}, which is {piece['state']}", f"close it: {answer}")
         if LEADING_PIECE.match(q["question"]):
             add("question", qid, "leads with a piece id instead of standing on its own",
-                f"restate it in plain words: {answer}, then wk question add {name} {product} \"...\" --piece <id>")
+                f"restate it in plain words: {answer}, then nh question add {name} {product} \"...\" --piece <id>")
     return found, rows, claimed
 
 
@@ -643,9 +643,9 @@ def _memory(s: dict, name: str, product: str, link: str, now=None) -> list[dict]
     """The list's supervisor chat or a builder of it that went past Claude's compact window lately (usage.py)."""
     try:
         hits = usage.memory(s, name, product, link, now=now)
-    except (OSError, ValueError, WorkkitError) as exc:
+    except (OSError, ValueError, KitError) as exc:
         return [_problem("memory", name, product, "", f"its chats' memory could not be checked ({exc})",
-                         "run wk check again; if it persists, tell the owner")]
+                         "run nh check again; if it persists, tell the owner")]
     return [_problem("memory", name, product, h["chat"],
                      f"went past the {h['limit'] // 1000}K memory limit without compacting (up to {h['peak'] // 1000}K"
                      + (f", {h['times']} times" if h["times"] > 1 else "") + f", last {h['when']})",
@@ -662,13 +662,13 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
     try:
         r = work.Repo(s, name)
         products = r.products()
-    except WorkkitError as exc:
+    except KitError as exc:
         return [_problem("repo", name, "", "", str(exc), "fix this laptop's settings file or the repo's .work/")]
     if only is not None and only not in products:
         r.product(only)  # the usual error, naming the known lists
     top, base, found, shared = r.top, r.base, [], []
     facts = _facts(top, base, gh, fetch, fetched)  # once it returns, the fetch is in
-    shared += [_problem("github", name, "", "", e, "check gh auth status and the network, then run wk check again")
+    shared += [_problem("github", name, "", "", e, "check gh auth status and the network, then run nh check again")
                for e in facts["error"]]
     claimed, all_rows = set(), {}
     for product in products:
@@ -689,14 +689,14 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
     for n, pr in sorted((prs or {}).items(), key=lambda kv: int(kv[0])):
         if pr["state"] == "OPEN" and f"#{n}" not in claimed and pr.get("headRefName") not in claimed:
             shared.append(_problem("github", name, "", f"PR #{n}", f"is open on {pr.get('headRefName')} but no piece records it",
-                                   f"wk piece set {name} <list> <id> --pr {n} --branch {pr.get('headRefName')}"))
+                                   f"nh piece set {name} <list> <id> --pr {n} --branch {pr.get('headRefName')}"))
     open_heads = {p.get("headRefName") for p in (prs or {}).values() if p["state"] == "OPEN"}
     acked = _acked(r.list_top)
     for b in sorted(remote or ()):
         if b != base and b not in open_heads | claimed | KEEP and f"branch:{b}" not in acked:
             shared.append(_problem("git", name, "", f"branch {b}", "is on GitHub with no open PR and no open piece",
                                    f"after the owner's yes: git push origin --delete {b}; or, to keep it: "
-                                   f"wk check {name} --ack branch:{b} --reason \"...\""))
+                                   f"nh check {name} --ack branch:{b} --reason \"...\""))
     for b in sorted(facts["local"]):
         if b.startswith("worktree-agent-") and b not in facts["worktrees"]:
             ahead = core.git(top, "rev-list", "--count", b, "--not", f"origin/{base}", check=False)
@@ -705,22 +705,24 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
                                        f"git -C {core.posix(top)} branch -d {b}") | {"auto": {"branch": b}})
     try:
         files = keepout.tracked(top, _ref(top, base))
-    except WorkkitError as exc:
+    except KitError as exc:
         files = []
         shared.append(_problem("files", name, "", "", f"its files on {base} could not be looked at ({exc})",
                                f"check that {base} exists here (git -C {core.posix(top)} fetch origin), "
-                               "then run wk check again"))
+                               "then run nh check again"))
     for path, why in files:
         if f"file:{path}" in acked:
             continue
-        keep = f"; or, if a deliberate visual test uses it, after the owner's yes: wk check {name} --ack " \
+        keep = f"; or, if a deliberate visual test uses it, after the owner's yes: nh check {name} --ack " \
                f"\"file:{path}\" --reason \"...\"" if path.lower().endswith(keepout.IMAGES) else ""
         shared.append(_problem("files", name, "", path, f"is {why} in git, so it is on GitHub",
                                f"git -C {core.posix(top)} rm --cached -- \"{path}\" (keeps your copy), "
                                "then commit that through a PR" + keep))
     for c in unreviewed(top, base, prs, acked, facts["history"]) if prs is not None else []:
         shared.append(_problem("main", name, "", c["sha"][:7], f"reached {base} without a PR: {c['subject'][:80]}",
-                               f"the owner looks at it, then: wk check {name} --ack {c['sha'][:12]} --reason \"...\""))
+                               f"the owner looks at it, then: nh check {name} --ack {c['sha'][:12]} --reason \"...\""))
+    if r.apart:  # a list kept in its own checkout: its base branch takes only records, like the code's takes only PRs
+        shared += _list_main(name, r, gh, acked)
     run = failed_run(top, facts.get("runs"), base, gh)
     if run:
         shared.append(_problem("tests", name, "", base, f"the newest tests on {base} failed",
@@ -733,7 +735,7 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
         shared.append(_problem("secret", name, "", where, what,
                                "if it is real: the owner changes it where it was issued, then a PR takes it out of "
                                "the file (git history keeps the old one, so changing it is what protects it); if it "
-                               f"isn't: after the owner's yes, wk check {name} --ack \"secret:{hit['path']}\" "
+                               f"isn't: after the owner's yes, nh check {name} --ack \"secret:{hit['path']}\" "
                                "--reason \"...\""))
     for path, words, budget in long_instructions(top):
         shared.append(_problem("bloat", name, "", path, f"is {words:,} words (budget {budget:,})",
@@ -743,13 +745,30 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
         if only is None or pb == only:  # shown once, on the list of the second piece
             found.append(_problem("alike", name, pb, b["id"], f"looks like {a['id']} \"{a['piece']}\"" +
                                   (f" on the {pa} list" if pa != pb else ""),
-                                  f"if they are one piece, fold {b['id']}'s note into {a['id']} and drop it (wk piece "
+                                  f"if they are one piece, fold {b['id']}'s note into {a['id']} and drop it (nh piece "
                                   f"set {name} {pb} {b['id']} --state dropped); if not, rename one so they read apart",
                                   b["piece"]))
     owner = owner_of(products, calls)
     if only is None or owner in ("", only):
         found += [p | {"owner": owner} for p in shared]
     return found
+
+
+def _list_main(name: str, r: work.Repo, gh, acked: set[str]) -> list[dict]:
+    """The main-branch audit for a list kept in its own checkout (`list = ...`): commits on its base branch (as last
+    fetched) that changed more than the records and came through none of that repo's merged PRs."""
+    try:
+        prs = json.loads(gh(r.list_top, "pr", "list", "--state", "merged", "--limit", "1000", "--json",
+                            "number,state,mergeCommit") or "[]")
+        prs = {str(p["number"]): p | {"state": p.get("state") or "MERGED"} for p in prs if isinstance(p, dict)}
+    except (KitError, ValueError, KeyError, TypeError, OSError) as exc:
+        return [_problem("github", name, "", "", f"the PRs of its list's repo could not be read ({exc})",
+                         "check gh auth status and the network, then run nh check again")]
+    where = core.posix(r.list_top)
+    return [_problem("main", name, "", c["sha"][:7], f"reached {r.list_base} of its list ({where}) without a PR: "
+                     f"{c['subject'][:80]}",
+                     f"the owner looks at it, then: nh check {name} --ack {c['sha'][:12]} --reason \"...\"")
+            for c in unreviewed(r.list_top, r.list_base, prs, acked)]
 
 
 def _hours(name: str, r: work.Repo, all_rows: dict, calls: str, only: str | None) -> list[dict]:
@@ -760,7 +779,7 @@ def _hours(name: str, r: work.Repo, all_rows: dict, calls: str, only: str | None
         p = h["product"]
         if h["billed"] or p == calls or (only is not None and p != only) or p not in all_rows:
             continue
-        fix = f"wk hours fix {name} {p} --date {h['date']} --was \"{h['note'][:40]}\" --for <pieces>"
+        fix = f"nh hours fix {name} {p} --date {h['date']} --was \"{h['note'][:40]}\" --for <pieces>"
         named = [i for i in h["pieces"].split(",") if i]
         known = {x["id"].upper() for x in all_rows[p]}
         if not named:
@@ -801,10 +820,10 @@ def check(s: dict, repo: str | None = None, product: str | None = None, today: d
 
 
 def at_start(s: dict, name: str, product: str, today: date | None = None) -> list[dict]:
-    """One list's findings for `wk recall`'s start block, from its own files only: its pieces, notes, questions and
+    """One list's findings for `nh recall`'s start block, from its own files only: its pieces, notes, questions and
     hours, and, for the list that owns the repo's shared findings, its billing file and instruction files' word
     budgets. Nothing here asks GitHub, fetches, greps the history or reads chat records (PR and branch links, CI,
-    leftover branches, secrets, memory stay with wk check), so the start stays fast and never waits on or fails for
+    leftover branches, secrets, memory stay with nh check), so the start stays fast and never waits on or fails for
     the network. Reminders are left out: the block shows the questions already."""
     r = work.Repo(s, name)
     products = r.products()
@@ -834,7 +853,7 @@ def needs_owner(p: dict) -> bool:
 
 def fix(s: dict, repo: str | None = None, product: str | None = None, dry_run: bool = False,
         today: date | None = None, gh=None) -> tuple[list[str], list[dict]]:
-    """Apply only the mechanical findings, through wk's usual writes (recorded, committed and pushed as wk piece set
+    """Apply only the mechanical findings, through wk's usual writes (recorded, committed and pushed as nh piece set
     does): a piece still ready or building whose PRs all merged becomes merged; an open piece's branch that exists
     neither on GitHub nor here is cleared; a builder's local branch with nothing off the base branch, whose folder
     is gone, is deleted with git branch -d (which keeps an unmerged one). Never a remote branch, a note, a question
@@ -866,7 +885,7 @@ def fix(s: dict, repo: str | None = None, product: str | None = None, dry_run: b
             continue
         try:
             push = str(work.set_piece(work.Repo(s, name), prod, pid, **changes).get("push", ""))
-        except WorkkitError as exc:
+        except KitError as exc:
             lines.append(f"could not set {name} {prod} {pid}: {exc}")
             left += why
             continue
@@ -874,7 +893,7 @@ def fix(s: dict, repo: str | None = None, product: str | None = None, dry_run: b
     return lines, left
 
 
-NOT_PUSHED = "RECORDED BUT NOT ON GITHUB"  # in a wk check --fix line whose push failed: the command exits 3
+NOT_PUSHED = "RECORDED BUT NOT ON GITHUB"  # in a nh check --fix line whose push failed: the command exits 3
 
 
 def fix_dates(s: dict, repo: str, product: str) -> dict:
@@ -906,26 +925,27 @@ def ack(s: dict, repo: str, sha: str, reason: str) -> dict:
     r = work.Repo(s, repo)
     reason = " ".join((reason or "").split())
     if not reason:
-        raise WorkkitError("Say what the owner decided about it (--reason)")
+        raise KitError("Say what the owner decided about it (--reason)")
     if sha.startswith("branch:"):
         full = "branch:" + sha[7:].strip()
         if full == "branch:":
-            raise WorkkitError("Name the branch to keep: --ack branch:<name>")
+            raise KitError("Name the branch to keep: --ack branch:<name>")
     elif sha.startswith(("file:", "secret:")):
         kind, _, given = sha.partition(":")
         full = f"{kind}:" + given.strip().replace("\\", "/")
         if full == f"{kind}:":
-            raise WorkkitError(f"Name the file to allow, as wk check shows it: --ack {kind}:<path>")
+            raise KitError(f"Name the file to allow, as nh check shows it: --ack {kind}:<path>")
     else:
-        full = core.git(r.top, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", check=False)
+        full = next((x for x in (core.git(top, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", check=False)
+                                 for top in ((r.top, r.list_top) if r.apart else (r.top,))) if x), "")
     if not full:
-        raise WorkkitError(f"No commit {sha} in {repo}")
+        raise KitError(f"No commit {sha} in {repo}")
     path, label = r.dir / ACK, full if full.startswith(("branch:", "file:", "secret:")) else full[:12]
 
     def edit():
         rows = work._read_tsv(path, ACK_COLUMNS)
         if any(x["sha"] == full for x in rows):
-            raise WorkkitError(f"{label} is already acknowledged")
+            raise KitError(f"{label} is already acknowledged")
         row = {"sha": full, "date": date.today().isoformat(), "reason": reason}
         work._write_tsv(path, ACK_COLUMNS, rows + [row])
         return [path], f"acknowledged {label}: {reason}", {"acknowledged": row}
