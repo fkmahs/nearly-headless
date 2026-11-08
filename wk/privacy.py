@@ -4,16 +4,16 @@ The private name list is built on this laptop and never written to any repo: eve
 the settings file, the owner's and approver's names, plus `[privacy] terms = [...]` there for names only the owner
 knows (an employer, people, tickets). The names of public repos themselves are left out. It is checked:
 
-    push    git's pre-push hook in each public checkout (wk setup installs it): the branch name, each pushed commit's
+    push    git's pre-push hook in each public checkout (nh setup installs it): the branch name, each pushed commit's
             message and every line it adds. A match stops the push, naming the file and line, never the name.
     pr      a job on GitHub, from the list held in the repo secret PRIVATE_TERMS: the PR's title, description and
             commit messages; it fails without printing the name. Without the secret (a PR from a fork gets none) it
-            says "not checked" and passes: wk gate fresh is the check at merge.
+            says "not checked" and passes: nh gate fresh is the check at merge.
     scan    any folder, e.g. the clean public tree before it is pushed.
     tree    builds that tree: every file on main except the list (.work/), for one clean commit with no history.
     secret  sets PRIVATE_TERMS on a GitHub repo from this laptop's list (via gh, never printed).
 
-wk gate fresh checks a public repo's PR title, description and comments with the same list (turns.py).
+nh gate fresh checks a public repo's PR title, description and comments with the same list (turns.py).
 """
 
 from __future__ import annotations
@@ -27,11 +27,12 @@ import subprocess
 from pathlib import Path
 
 from . import core, settings
-from .core import WorkkitError
+from .core import KitError
 
 MIN = 3  # shorter names match too much ordinary text
 ZERO = "0" * 40
-HOOK_MARK = "# work-kit: the privacy guard"
+HOOK_MARK = "# nearly-headless: the privacy guard"
+OLD_MARK = "# work-kit: the privacy guard"  # the hook as releases before 1.56.0 wrote it: still ours, replaced
 
 
 def terms(s: dict, extra: list[str] = ()) -> list[str]:
@@ -155,7 +156,7 @@ def ci(env: dict = os.environ, cwd: Path = Path(".")) -> tuple[int, str]:
     names = [t.strip() for t in (env.get("PRIVATE_TERMS") or "").splitlines() if len(t.strip()) >= MIN]
     if not names:
         return 0, "Privacy check: not checked (no private name list here; a PR from a fork gets no secrets). " \
-                  "wk gate fresh checks it before merge."
+                  "nh gate fresh checks it before merge."
     try:
         event = json.loads(Path(env.get("GITHUB_EVENT_PATH", "")).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -179,9 +180,9 @@ def set_secret(repo: str, names: list[str]) -> dict:
         done = subprocess.run(["gh", "secret", "set", "PRIVATE_TERMS", "--repo", repo], input="\n".join(names) + "\n",
                               capture_output=True, text=True, encoding="utf-8", timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise WorkkitError(f"gh secret set failed: {exc}") from exc
+        raise KitError(f"gh secret set failed: {exc}") from exc
     if done.returncode:
-        raise WorkkitError("gh secret set failed: " + done.stderr.strip()[-300:])
+        raise KitError("gh secret set failed: " + done.stderr.strip()[-300:])
     return {"repo": repo, "secret": "PRIVATE_TERMS", "names": len(names)}
 
 
@@ -192,8 +193,8 @@ def hook_path(top: Path) -> Path:
 
 
 def hook_text(launcher: Path) -> str:
-    return (f"#!/bin/sh\n{HOOK_MARK}: a push that would publish a private name stops here (wk setup keeps this "
-            f"file).\nexec sh \"{core.posix(launcher)}\" privacy push \"$@\"\n")  # sh: bin/wk needs no exec bit
+    return (f"#!/bin/sh\n{HOOK_MARK}: a push that would publish a private name stops here (nh setup keeps this "
+            f"file).\nexec sh \"{core.posix(launcher)}\" privacy push \"$@\"\n")  # sh: bin/nh needs no exec bit
 
 
 def install_hook(top: Path, launcher: Path) -> dict:
@@ -203,7 +204,7 @@ def install_hook(top: Path, launcher: Path) -> dict:
     text = hook_text(launcher)
     if path.is_file():
         old = path.read_text(encoding="utf-8", errors="replace")
-        if HOOK_MARK not in old:
+        if HOOK_MARK not in old and OLD_MARK not in old:
             return {"installed": False, "file": core.posix(path),
                     "why": "it already has its own pre-push hook; add the line: " + text.splitlines()[-1]}
         if old == text:
@@ -228,14 +229,14 @@ def tree(top: Path, out: Path, ref: str = "origin/main") -> dict:
     """The public copy of a repo: every file on `ref` except the list (`.work/`), written to an empty folder `out`,
     ready to be one clean commit with no history."""
     if out.exists() and any(out.iterdir()):
-        raise WorkkitError(f"{core.posix(out)} is not empty; give a new folder")
+        raise KitError(f"{core.posix(out)} is not empty; give a new folder")
     try:
         done = subprocess.run(["git", "-C", str(top), "-c", "core.autocrlf=false", "archive", "--format=tar", ref],
                               capture_output=True, timeout=120)  # the repo's own bytes, not this laptop's line endings
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise WorkkitError(f"git archive {ref}: {exc}") from exc
+        raise KitError(f"git archive {ref}: {exc}") from exc
     if done.returncode:
-        raise WorkkitError(f"git archive {ref}: " + done.stderr.decode("utf-8", "replace").strip()[-300:])
+        raise KitError(f"git archive {ref}: " + done.stderr.decode("utf-8", "replace").strip()[-300:])
     out.mkdir(parents=True, exist_ok=True)
     kept = 0
     with tarfile.open(fileobj=io.BytesIO(done.stdout)) as tar:

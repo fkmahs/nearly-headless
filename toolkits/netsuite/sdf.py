@@ -4,10 +4,10 @@ What is client-specific (auth IDs, login domains, .env key prefixes, the File Ca
 reference imports go) comes from the repo's sdf.toml; see the toolkit's README. Run it from the repo (or through the
 repo's own thin entry point):
 
-    py <work-kit>/toolkits/netsuite/sdf.py <command> sb|prod ...
+    py <nearly-headless>/toolkits/netsuite/sdf.py <command> sb|prod ...
 
 Every command names its environment explicitly (sb or prod); the kit points the SuiteCloud CLI at the matching auth
-ID by rewriting the git-ignored project.json before each call. Turns and gates come from work-kit's `wk`. Guard rails:
+ID by rewriting the git-ignored project.json before each call. Turns and gates come from the kit's `wk`. Guard rails:
 
 - account check: before every call, the auth ID's account must be the right kind (sandbox or not) and match the
   account ID in the repo's .env.
@@ -15,12 +15,12 @@ ID by rewriting the git-ignored project.json before each call. Turns and gates c
   - sandbox: the src/ files and objects this branch changed since its merge-base with origin/main (plus the script
     file of each changed script record);
   - production (--pr N): the src/ files and objects the PR's merge commit changed.
-- production runs only after the merge: on main, clean and level with origin/main (`wk gate release`), for a merged
+- production runs only after the merge: on main, clean and level with origin/main (`nh gate release`), for a merged
   PR (--pr N) whose merge commit is in HEAD, with the owner's approval comment on that PR for its head commit
-  (`wk gate approved --pr N --action "deploy to production"`, or "upload to production"); a release is tagged
+  (`nh gate approved --pr N --action "deploy to production"`, or "upload to production"); a release is tagged
   prod-<date>-pr<N>, listing the files it sent.
 - sandbox turns: a sandbox deploy or upload is refused unless this branch holds a turn on every file it sends
-  (`wk turn check sandbox <files>`). `release sb` puts main's version of those files back, then frees the turn.
+  (`nh turn check sandbox <files>`). `release sb` puts main's version of those files back, then frees the turn.
 - production compare: before a production deploy or upload (and in its dry run), production's current copy of every
   file and object it sends is imported read-only into a temporary folder and compared with what will be sent:
   already live (no approval needed), changed since production's version (needs the PRs that changed it since),
@@ -31,7 +31,7 @@ ID by rewriting the git-ignored project.json before each call. Turns and gates c
 - imports with --reference are moved out of src/ into <reference>/<YYYY-MM-DD>/ so they can never be deployed.
 - release ancestry (production): refuses unless every prod-* tag is in HEAD's history.
 - tool version: deploy and upload refuse when origin/main has changes to the repo's tool files (sdf.toml, its
-  entry point) this branch lacks; every command refuses when this work-kit is older than sdf.toml's `requires`.
+  entry point) this branch lacks; every command refuses when this nearly-headless is older than sdf.toml's `requires`.
 """
 
 import argparse
@@ -52,14 +52,14 @@ sys.path.insert(0, str(KIT))
 import query  # noqa: E402  (the toolkit's .env reader)
 import sdf_compare  # noqa: E402
 
-KIT_HOME = KIT.parent.parent            # this work-kit checkout
+KIT_HOME = KIT.parent.parent            # this nearly-headless checkout
 ROOT = Path.cwd()                       # the client repo; configure() sets it
 SRC = ROOT / "src"
 CABINET = SRC / "FileCabinet"
 PROJECT_JSON = "project.json"
 CONFIG_FILE = "sdf.toml"
 DEFAULTS = {
-    "requires": "",                     # required: the oldest work-kit the repo needs
+    "requires": "",                     # required: the oldest nearly-headless the repo needs
     "own_folder": "",                   # e.g. /SuiteScripts/ACME/: the only folder a plain upload touches
     "wrapper_env": "WK_SDF_WRAPPER",    # set for every CLI call; the repo's suitecloud.config.js can require it
     "reference": "reference",           # --reference imports and replace-in-place backups go under it
@@ -70,7 +70,7 @@ DEFAULTS = {
     "compare": {},
 }
 CONFIG = dict(DEFAULTS)
-WORK_KIT = KIT_HOME   # where wk is found when the wk on PATH is not work-kit's
+NH_KIT = KIT_HOME   # where wk is found when the wk on PATH is not the kit's
 
 
 def fail(msg):
@@ -160,8 +160,8 @@ PATHFIX_EXPORTS = ("jdk.internal.classfile", "jdk.internal.classfile.instruction
 
 
 def pathfix_build_dir():
-    """A per-user cache folder, keyed by the agent's source, so work-kit's checkout never holds build output."""
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "work-kit" / "sdf-pathfix"
+    """A per-user cache folder, keyed by the agent's source, so the kit's checkout never holds build output."""
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "nearly-headless" / "sdf-pathfix"
     return base / hashlib.sha256(PATHFIX_SRC.read_bytes()).hexdigest()[:12]
 
 
@@ -252,32 +252,32 @@ def check_env(env):
     return auth_id
 
 
-# --- work-kit: wk gate for production, wk turn for the sandbox ---
+# --- nearly-headless: nh gate for production, nh turn for the sandbox ---
 
-SANDBOX = "sandbox"  # the wk turn resource; its items are the src/ paths a sandbox deploy or upload sends
+SANDBOX = "sandbox"  # the nh turn resource; its items are the src/ paths a sandbox deploy or upload sends
 
 
-def is_work_kit(home):
-    """True for a work-kit checkout: its wk package, not another tool's 'wk' (an old command center's)."""
+def is_nh_kit(home):
+    """True for a nearly-headless checkout: its wk package, not another tool's 'wk' (an old command center's)."""
     return (home / "wk" / "__main__.py").is_file() and (home / "wk" / "turns.py").is_file()
 
 
-def work_kit_home():
-    """The work-kit whose wk runs turns and gates: the one whose bin/ holds the wk on PATH (the installed one), else
+def nh_kit_home():
+    """The nearly-headless whose wk runs turns and gates: the one whose bin/ holds the wk on PATH (the installed one), else
     the checkout this kit is in. Refuses otherwise."""
-    found = shutil.which("wk")
-    homes = ([Path(found).resolve().parent.parent] if found else []) + [WORK_KIT]
+    found = shutil.which("nh") or shutil.which("wk")
+    homes = ([Path(found).resolve().parent.parent] if found else []) + [NH_KIT]
     for home in homes:
-        if is_work_kit(home):
+        if is_nh_kit(home):
             return home
-    fail(f"work-kit was not found (looked at {', '.join(h.as_posix() for h in homes)}); sandbox turns and production "
-         "gates need it. Put work-kit's bin/ folder on PATH")
+    fail(f"nearly-headless was not found (looked at {', '.join(h.as_posix() for h in homes)}); sandbox turns and production "
+         "gates need it. Put the kit's bin/ folder on PATH")
 
 
 def wk_command():
-    """(argv prefix, env) to run work-kit's wk: always `python -m wk` from the work-kit checkout (what its bin/wk.cmd
+    """(argv prefix, env) to run the kit's wk: always `python -m wk` from the nearly-headless checkout (what its bin/wk.cmd
     does), so paths with '|' and '&' never pass through cmd.exe and no other tool's 'wk' is run."""
-    home = work_kit_home()
+    home = nh_kit_home()
     path = os.pathsep.join(filter(None, [str(home), os.environ.get("PYTHONPATH")]))
     return [sys.executable, "-m", "wk"], dict(os.environ, PYTHONPATH=path)
 
@@ -293,7 +293,7 @@ def wk(*args):
 def wk_refusal(*args):
     """The refusal from `wk <args>` (None when it passes)."""
     code, out = wk(*args)
-    return f"wk {' '.join(args)}: {out}" if code else None
+    return f"nh {' '.join(args)}: {out}" if code else None
 
 
 def gh_json(*args):
@@ -313,7 +313,7 @@ def has_commit(rev):
 
 
 def prod_action(action):
-    """The approval's action text for wk gate approved: 'deploy to production' / 'upload to production'."""
+    """The approval's action text for nh gate approved: 'deploy to production' / 'upload to production'."""
     return f"{action} to production"
 
 
@@ -349,7 +349,7 @@ def merged_pr(pr, head="HEAD"):
 
 
 def approval_comment(data, accepted):
-    """The body of the PR comment wk gate approved accepted (accepted: its JSON output, which names the comment's
+    """The body of the PR comment nh gate approved accepted (accepted: its JSON output, which names the comment's
     URL; that comment has the configured approver's line for the PR's head). '' when it can't be matched, so then
     only the released PR is covered."""
     try:
@@ -360,38 +360,38 @@ def approval_comment(data, accepted):
     return bodies[-1] if bodies else ""
 
 
-KIT_FILES = ("toolkits/netsuite", "wk")   # what a production release runs from work-kit: this kit and wk's gates
+KIT_FILES = ("toolkits/netsuite", "wk")   # what a production release runs from nearly-headless: this kit and wk's gates
 
 
 def checkout_refusal(home, what):
-    """The refusal when the work-kit checkout at home has uncommitted or untracked changes in KIT_FILES, or a HEAD
-    not on work-kit's origin/main (main ahead only by its own records is fine). None when it is clean and released."""
+    """The refusal when the nearly-headless checkout at home has uncommitted or untracked changes in KIT_FILES, or a HEAD
+    not on the kit's origin/main (main ahead only by its own records is fine). None when it is clean and released."""
     def kgit(*args):
         return subprocess.run(["git", *args], cwd=home, capture_output=True, text=True)
     where = Path(home).as_posix()
     dirty = kgit("status", "--porcelain", "--", *KIT_FILES)
     if dirty.returncode != 0:
-        return f"{what} at {where} is not a git checkout of work-kit, so it can't be checked; production " \
-               "releases run only a released work-kit (wk update)"
+        return f"{what} at {where} is not a git checkout of nearly-headless, so it can't be checked; production " \
+               "releases run only a released nearly-headless (nh update)"
     if dirty.stdout.strip():
         return (f"{what} at {where} has uncommitted changes:\n" + dirty.stdout.rstrip() +
-                f"\nProduction releases run only a released work-kit: undo those changes in {where} (or run from a "
-                "clean work-kit with wk update), then run this again")
+                f"\nProduction releases run only a released nearly-headless: undo those changes in {where} (or run from a "
+                "clean nearly-headless with nh update), then run this again")
     kgit("fetch", "-q", "origin", "main")
     on_main = kgit("merge-base", "--is-ancestor", "HEAD", "origin/main").returncode == 0
     # A main ahead only by its own records (wk's .work/ commits not pushed yet) runs main's code all the same.
     if not on_main and kgit("diff", "--quiet", "origin/main", "HEAD", "--", *KIT_FILES).returncode != 0:
         branch = kgit("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-        return (f"{what} at {where} is on '{branch}', which is not in work-kit's origin/main; production "
-                f"releases run only a released work-kit. In {where}: git switch main, then wk update (or unset "
-                "WORK_KIT_HOME if it points at a feature checkout), then run this again")
+        return (f"{what} at {where} is on '{branch}', which is not in the kit's origin/main; production "
+                f"releases run only a released nearly-headless. In {where}: git switch main, then nh update (or unset "
+                "NH_KIT_HOME if it points at a feature checkout), then run this again")
     return None
 
 
 def kit_checkout_refusal():
-    """A production release runs only released code: the work-kit whose wk runs the gates, and this kit's own
+    """A production release runs only released code: the nearly-headless whose wk runs the gates, and this kit's own
     checkout when that is a different one. Their refusals, joined; None when both are clean and on origin/main."""
-    homes = {Path(work_kit_home()).resolve(): "work-kit (its wk runs the production gates)"}
+    homes = {Path(nh_kit_home()).resolve(): "nearly-headless (its wk runs the production gates)"}
     homes.setdefault(Path(KIT_HOME).resolve(), "the SDF kit")
     found = [r for home, what in homes.items() for r in [checkout_refusal(home, what)] if r]
     return "\n".join(found) or None
@@ -414,7 +414,7 @@ def prod_gates(action, pr):
     args = ("gate", "approved", "--pr", str(pr), "--action", prod_action(action))
     code, out = wk(*args)
     if code:
-        return refusals + [f"wk {' '.join(args)}: {out}"], None, data
+        return refusals + [f"nh {' '.join(args)}: {out}"], None, data
     return refusals, {"label": pr_label(pr), "text": approval_comment(data, out), "pr": pr}, data
 
 
@@ -434,9 +434,9 @@ def check_turn(paths):
     """A sandbox deploy or upload sends only files this branch holds a turn on."""
     code, out = wk("turn", "check", SANDBOX, *paths)
     if code:
-        fail(f"no sandbox turn on every file this sends ({out.removeprefix('wk: ')}).\n"
+        fail(f"no sandbox turn on every file this sends ({out.removeprefix('nh: ').removeprefix('wk: ')}).\n"
              f"The supervisor decides whose turn it is; then take it (it needs main merged in first):\n"
-             f"  wk turn take {SANDBOX} {quoted(paths)}\n"
+             f"  nh turn take {SANDBOX} {quoted(paths)}\n"
              f"When done: {entry()} release sb")
 
 
@@ -444,7 +444,7 @@ def held_items():
     """The sandbox items this branch's turns hold (live or expired; another branch's take replaces them)."""
     code, out = wk("--json", "turn", "list", SANDBOX)
     if code:
-        fail(f"wk turn list failed: {out}")
+        fail(f"nh turn list failed: {out}")
     branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
     return [i for g in json.loads(out or "[]") if g.get("holder") == branch for i in g.get("items", [])]
 
@@ -575,7 +575,7 @@ def included(text):
 
 def coverage(own, changes, approval=None):
     """{PR label or SHA: reason or None}: who covers each PR / unattributed commit in changes ([{'prs', 'commits'}]).
-    own: the released PR ('PR #N'). approval: the PR approval that passed wk gate ({'label': 'PR #N', 'text': its
+    own: the released PR ('PR #N'). approval: the PR approval that passed nh gate ({'label': 'PR #N', 'text': its
     comment}); it covers own, and the PRs and commits its 'Includes' lines name (included()). Without it, nothing is
     covered."""
     includes = included(approval["text"] if approval else "")
@@ -795,7 +795,7 @@ def release_compare(own, rev, action, items, head="HEAD", approval=None, own_com
                     upload_objects=None):
     """Print what this production deploy/upload carries against production and return the refusal (or None).
     own: the released PR ('PR #N'); items: [(src path, File Cabinet path)] it sends. approval: the PR approval that
-    passed wk gate (see coverage()); own_commits: see change_owners (a preview before the merge). upload_objects:
+    passed nh gate (see coverage()); own_commits: see change_owners (a preview before the merge). upload_objects:
     for an upload, the src/Objects paths the PRs in it changed (a set, or a function of those PRs' labels: the
     released PR and the PRs the compare finds); any of them not live in production means it is a deploy."""
     sent = {p for p, _ in items}
@@ -1031,12 +1031,12 @@ def version_tuple(v):
 
 
 def kit_refusal():
-    """The refusal when this work-kit is older than the version the repo's sdf.toml requires."""
+    """The refusal when this nearly-headless is older than the version the repo's sdf.toml requires."""
     need, have = CONFIG["requires"], kit_version()
     if version_tuple(have) >= version_tuple(need):
         return None
-    return (f"this repo's {CONFIG_FILE} needs work-kit {need} or newer, and this laptop runs work-kit {have} "
-            f"({KIT_HOME.as_posix()}). Update work-kit first (wk update), then run this again")
+    return (f"this repo's {CONFIG_FILE} needs nearly-headless {need} or newer, and this laptop runs nearly-headless {have} "
+            f"({KIT_HOME.as_posix()}). Update nearly-headless first (nh update), then run this again")
 
 
 def tool_refusal(head="HEAD"):

@@ -187,11 +187,11 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
       <section class="card"><header><h2>Loose ends on this laptop</h2><span id="l-count"></span></header><div class="body" id="l-body"></div></section>
     </section>
     <section class="view" id="v-kit">
-      <section class="card"><header><h2>How work-kit runs your work</h2><span>Tap any part to see what it does</span></header><div class="body" id="k-arch"></div></section>
+      <section class="card"><header><h2>How nearly-headless runs your work</h2><span>Tap any part to see what it does</span></header><div class="body" id="k-arch"></div></section>
       <section class="card"><header><h2>What runs on its own</h2><span id="k-hooks-n"></span></header><div class="body" id="k-hooks"></div></section>
       <section class="card"><header><h2>Who does what</h2><span>Read from the skills and commands on this laptop</span></header><div class="body" id="k-roles"></div></section>
       <section class="card"><header><h2>Settings on this laptop</h2><span>Change them in the settings files</span></header><div class="body" id="k-settings"></div></section>
-      <section class="card"><header><h2>work-kit</h2><span id="k-state"></span></header><div class="body" id="k-body"></div></section>
+      <section class="card"><header><h2>nearly-headless</h2><span id="k-state"></span></header><div class="body" id="k-body"></div></section>
     </section>
     <section class="view" id="v-usage"><div class="loading" id="u-state" role="status" hidden></div><div class="usage" id="u-body"></div></section>
   </main>
@@ -215,7 +215,7 @@ const ago = (d, verb) => { const n = days(d); return n === null ? "" : n === 0 ?
 const prNum = v => String(v || "").replace("#", "");
 // ---------------------------------------------------------------- model: repo > supervisor (or parked) > status > items
 // Each list's questions hang on the piece they are about (its id, or its PR number); one about no open piece stands
-// alone. Its wk check findings (to fix) are its own plus the repo-wide ones wk check gives it.
+// alone. Its nh check findings (to fix) are its own plus the repo-wide ones nh check gives it.
 const lists = [], pieces = {}, asks = {};
 // a finding nobody needs to act on (memory limit) is a quiet note, never counted as "to fix"; so is one on a parked
 // list (no supervisor yet): it shows, marked as waiting for a supervisor
@@ -260,9 +260,9 @@ document.getElementById("owner").textContent = (D.owner || "") + " · this lapto
 document.getElementById("stamp").textContent = `Updated ${D.at}${D.fetched_at ? ` · GitHub checked ${D.fetched_at}` : ""}`;
 if (D.saved) document.getElementById("refresh").style.display = "none";
 const kitState = D.kit.restart_failed ? "restart failed" : D.kit.restart ? "restarting" : D.kit.behind ? "update available" : "current";
-document.getElementById("kitfoot").innerHTML = `work-kit <b class="${D.kit.behind || D.kit.restart ? "warn" : ""}">${esc(D.kit.version)}</b> · ${kitState}`;
+document.getElementById("kitfoot").innerHTML = `nearly-headless <b class="${D.kit.behind || D.kit.restart ? "warn" : ""}">${esc(D.kit.version)}</b> · ${kitState}`;
 // a saved copy of the page has no server behind it, so no Tokens & cost tab
-const VIEWS = [["work", "Your work", all.w, "warn"], ["repos", "Repos & PRs", prs.length], ["kit", "work-kit", ""], ...(D.saved ? [] : [["usage", "Tokens & cost", ""]])];
+const VIEWS = [["work", "Your work", all.w, "warn"], ["repos", "Repos & PRs", prs.length], ["kit", "nearly-headless", ""], ...(D.saved ? [] : [["usage", "Tokens & cost", ""]])];
 document.getElementById("nav").innerHTML = VIEWS.map(([id, t, n, c]) => `<a href="#${id}" data-view="${id}">${esc(t)}${n !== "" ? `<span class="n ${n && c ? c : ""}">${n}</span>` : ""}</a>`).join("");
 function show() {
   const [id, arg] = (location.hash || "#work").slice(1).split("/"), v = VIEWS.find(x => x[0] === id) || VIEWS[0];  // old links (#waiting, #hours) land on Your work
@@ -275,7 +275,7 @@ function show() {
 window.addEventListener("hashchange", show);
 // ---------------------------------------------------------------- waiting on the server: a spinner and a plain line
 const SPIN = `<span class="spin" aria-hidden="true"></span>`;
-const why = e => e instanceof TypeError ? "the command center did not answer: is wk serve still running?" : e.message;  // TypeError: no answer at all
+const why = e => e instanceof TypeError ? "the command center did not answer: is nh serve still running?" : e.message;  // TypeError: no answer at all
 // Tokens & cost: read from this laptop's chat records when the tab opens (it takes a moment), and again for another
 // number of weeks; what shows stays until the new figures are in
 let usageWeeks = 0, usageAsk = 0;
@@ -331,14 +331,14 @@ const statusOf = x => x.state === "ready" ? ["Waiting on you: PR ready", "p-wait
   x.qs.length ? [x.state === "building" ? "Building · waiting on you" : "Waiting on you", "p-wait"] :
   x.q ? (x.q.start ? [`Queued ${x.q.place} · starts next`, "p-build"] : [`Queued ${x.q.place} · waits: ${x.q.why}`, "p-todo"]) :
   !x.list.sup && x.state === "todo" ? ["Parked", "p-todo"] : x.state === "building" ? ["Building", "p-build"] : ["To do", "p-todo"];
-// how long the oldest question has waited, once it is more than wk check's reminder age (a fact, not a fault)
+// how long the oldest question has waited, once it is more than nh check's reminder age (a fact, not a fault)
 const waited = qs => { const n = Math.max(-1, ...qs.map(q => days(q.asked) ?? -1)); return n > (D.stale_days ?? 2) ? `waiting ${n} days` : ""; };
 const age = qs => waited(qs) ? ` <span class="age">${waited(qs)}</span>` : "";
 const statusCell = x => { const l = x.list, n = prNum(x.pr), [label, cls] = statusOf(x);
   return `<span class="pill ${cls}">${esc(label)}</span>${age(x.qs)}${n ? " " + prLink(l.repo, n) : ""}${x.idle_hours ? ` <span class="pill p-bad">no activity for ${esc(x.idle_hours)}h</span>` : ""}`; };
 const fixGroups = {};
 const fixLine = (key, list, items) => { if (!items.length) return ""; fixGroups[key] = {list, items};
-  return `<button class="fixline" data-fixes="${esc(key)}"><span class="fixdot"></span>${items.length} to fix, found by wk check</button>`; };
+  return `<button class="fixline" data-fixes="${esc(key)}"><span class="fixdot"></span>${items.length} to fix, found by nh check</button>`; };
 // notes nobody acts on: one grey line per kind ("Memory limit: 3 notes, nothing to fix")
 const WAITING = "Waiting for a supervisor";
 const noteLines = (key, list, items) => { const by = {}, waiting = items.filter(f => f.waits);
@@ -474,7 +474,7 @@ function openAsk(q) {
     `<p class="muted">Answer it in the supervisor's chat.</p>`);
 }
 const fixTitle = f => f.about || f.name ? `${clean((f.about || {}).piece || f.name)} (${f.item})` : f.ask ? f.ask.question : f.item && f.item.length < 60 ? f.item : "";
-// what each kind of finding means and who acts on it, in plain words; the commands stay in wk check for the supervisor
+// what each kind of finding means and who acts on it, in plain words; the commands stay in nh check for the supervisor
 const WHO = {supervisor: "Your supervisor fixes these at its next check.", owner: "These need your yes; your supervisor will ask.",
              nobody: "Nothing to fix; worth a word to the supervisor if it keeps happening.",
              waiting: "This list has no supervisor yet; its supervisor fixes these when it starts."};
@@ -482,7 +482,7 @@ function openFixes(g) {
   const kinds = D.kinds || {}, by = {};
   g.items.forEach(f => { (by[f.kind] = by[f.kind] || []).push(f); });
   popup(g.quiet || `${g.items.length} to fix`, where(g.list),
-    (g.quiet ? `<span class="pill p-todo">Nothing to fix</span>` : `<span class="pill p-bad">Found by wk check</span>`) + supLink(g.list),
+    (g.quiet ? `<span class="pill p-todo">Nothing to fix</span>` : `<span class="pill p-bad">Found by nh check</span>`) + supLink(g.list),
     Object.entries(by).map(([kind, fs]) => { const k = kinds[kind] || {heading: "Other", means: "", who: "supervisor"};
       return `<div class="fixgroup"><h4>${esc(k.heading)}</h4>${k.means ? `<p class="means">${esc(k.means)}</p>` : ""}<p class="who">${esc(WHO[g.quiet === WAITING ? "waiting" : k.who] || "")}</p>` +
         fs.map(f => `<div class="fix">${fixTitle(f) ? `<div class="what">${esc(fixTitle(f))}</div>` : ""}<div>${esc(f.what.replace(/^./, c => c.toUpperCase()))}.</div></div>`).join("") + `</div>`; }).join(""));
@@ -517,20 +517,20 @@ document.getElementById("l-count").textContent = loose.length ? `${loose.length}
 document.getElementById("l-body").innerHTML = loose.length ? loose.map(l => `<div class="item"><span class="pill p-wait">Tidy</span><div class="what">${esc(l.text)}</div><div class="meta">${esc(l.repo)}</div></div>`).join("")
   : `<p style="margin:0;color:var(--ok);font-weight:600">Nothing left lying around.</p>`;
 document.getElementById("k-state").textContent = kitState;
-document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version <b style="color:var(--ink)">${esc(D.kit.version)}</b>${D.kit.behind ? ` · <b style="color:var(--wait)">${esc(D.kit.latest)}</b> is out and installs itself on the next wk command` : " · the newest release"}.</p>
+document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version <b style="color:var(--ink)">${esc(D.kit.version)}</b>${D.kit.behind ? ` · <b style="color:var(--wait)">${esc(D.kit.latest)}</b> is out and installs itself on the next nh command` : " · the newest release"}.</p>
   <p style="margin:0;color:var(--muted)">${D.kit.stale_skills.length ? esc(D.kit.stale_skills.join("; ")) : "Skills and your expectations are current for every agent on this laptop."} It checks GitHub once a day and updates itself.</p>`;
-// ---------------------------------------------------------------- how work-kit runs: every part, read from this laptop
+// ---------------------------------------------------------------- how nearly-headless runs: every part, read from this laptop
 // D.system comes from wk/system.py: the hooks setup installs, each role with its skill or command text, the settings.
 // The picture is drawn wide (one map) or, on a phone, as the steps in order with the parts beside each.
 (function arch() {
   const S = D.system || {}, box = document.getElementById("k-arch");
-  if (!S.roles) { box.innerHTML = `<p class="muted">Couldn't read work-kit's parts: ${esc(S.error || "unknown")}</p>`; return; }
+  if (!S.roles) { box.innerHTML = `<p class="muted">Couldn't read the kit's parts: ${esc(S.error || "unknown")}</p>`; return; }
   const hooks = S.hooks || [], on = hooks.filter(h => h.on).length;
   const P = {};  // every part by id: the roles, plus the hooks as one part
   S.roles.forEach(r => { P[r.id] = r; });
   P.hooks = {id: "hooks", name: "Hooks", does: `${on} of ${hooks.length} on: Claude runs them by itself`, to: ["supervisor"], hooks: true};
   const from = id => Object.values(P).filter(p => (p.to || []).includes(id)).map(p => p.id);
-  const STATE = {current: ["Installed and current", "p-ready"], "not current": ["Not current: run wk update", "p-wait"], missing: ["Missing", "p-bad"]};
+  const STATE = {current: ["Installed and current", "p-ready"], "not current": ["Not current: run nh update", "p-wait"], missing: ["Missing", "p-bad"]};
   const statePill = st => STATE[st] ? `<span class="pill ${STATE[st][1]}">${esc(STATE[st][0])}</span>` : "";
   const names = ids => ids.map(i => P[i] ? `<a href="#kit" data-part="${esc(i)}">${esc(P[i].name)}</a>` : "").filter(Boolean).join(", ");
   const hookRow = h => `<div class="item" data-hook="${esc(hooks.indexOf(h))}" role="button" tabindex="0">` +
@@ -540,16 +540,16 @@ document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version
     const body = p.hooks ? hooks.map(hookRow).join("") :
       (p.does ? `<p>${esc(p.does)}.</p>` : "") +
       (from(id).length ? `<p><b>Gets work from:</b> ${names(from(id))}</p>` : "") + ((p.to || []).length ? `<p><b>Hands to:</b> ${names(p.to)}</p>` : "") +
-      (p.state === "missing" ? `<p class="muted">Its source is missing from work-kit: ${esc(p.source)}.</p>`
+      (p.state === "missing" ? `<p class="muted">Its source is missing from nearly-headless: ${esc(p.source)}.</p>`
         : p.detail ? `<h4 class="subhead">Details</h4>${md(p.detail)}<p class="muted">From ${esc(p.source)}</p>` : "");
-    popup(p.name, "work-kit " + (S.version || ""), statePill(p.state), body); };
+    popup(p.name, "nearly-headless " + (S.version || ""), statePill(p.state), body); };
   window.openHook = i => { const h = hooks[i]; if (!h) return;
     popup(h.when, "A hook: Claude runs it by itself", hookRow(h).replace(/^<div class="item"[^>]*>/, "<div class=\"item\">"),
       `<p>${esc(h.what)}.</p>` +
       ((h.checks || []).length ? `<h4 class="subhead">What it checks</h4>` + h.checks.map(c => `<div class="item"><span class="pill ${c.on ? "p-ready" : "p-todo"}">${c.on ? "On" : "Off"}</span>` +
         `<div class="what">${esc(c.name)}</div><div class="meta">${esc(c.says)}</div></div>`).join("") : "") +
       (h.idle ? `<p class="muted">Installed, and does nothing until you turn it on in the settings file.</p>` : "") +
-      (h.on === false ? `<p class="muted">Not installed: run wk setup.</p>` : "") +
+      (h.on === false ? `<p class="muted">Not installed: run nh setup.</p>` : "") +
       `<h4 class="subhead">Details</h4><p><b>Event:</b> <code>${esc(h.event)}${h.matcher ? ` (${esc(h.matcher)})` : ""}</code><br><b>Runs:</b> <code>${esc(h.command)}</code><br><b>Set in:</b> ${esc(h.file)}</p>`); };
   // the main line: from You, follow each part's first hand-off; every other part sits beside the step it joins
   const chain = [];
@@ -574,7 +574,7 @@ document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version
     if (l && (l + " " + word).length <= n) ls[ls.length - 1] = l + " " + word; else ls.push(word); return ls; }, []).slice(0, 3);
   const cls = id => id === "you" ? "you" : id === "release" ? "rel" : chain.includes(id) ? "" : "aux";
   const marker = s => `<marker id="ah-${s}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah ${s}" d="M0 0L10 5L0 10z"/></marker>`;
-  const map = `<svg class="arch wide" viewBox="0 0 ${W} ${H}" role="img" aria-label="How work-kit runs your work"><defs>${marker("main")}${marker("soft")}</defs>` +
+  const map = `<svg class="arch wide" viewBox="0 0 ${W} ${H}" role="img" aria-label="How nearly-headless runs your work"><defs>${marker("main")}${marker("soft")}</defs>` +
     shown.flatMap(a => (P[a].to || []).filter(b => at[b]).map(b => { const [x1, y1, x2, y2] = edge(a, b), soft = !(chain.includes(a) && chain.includes(b));
       return `<line class="e ${soft ? "soft" : ""}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#ah-${soft ? "soft" : "main"})"/>`; })).join("") +
     shown.map(id => { const [x, y] = at[id], p = P[id];

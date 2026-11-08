@@ -1,4 +1,4 @@
-"""wk test: run only the checks a repo's own change -> check map names for what this branch changed, so a builder's
+"""nh test: run only the checks a repo's own change -> check map names for what this branch changed, so a builder's
 local proof takes minutes and CI stays the full proof.
 
 The map is a `## Change → check` table in AGENTS.md or CONTRIBUTING.md, one row per area: the first cell names its
@@ -7,7 +7,7 @@ its check: `none: ...`, a command in backticks (`<kit>` filled in from the path)
 
 On a laptop that isn't Linux, in a repo with a wk-test.Dockerfile, the checks run only in a Linux container (Windows is
 many times slower at the tests' git and file work). Docker off: wk starts Docker Desktop and waits for it; if it still
-can't, nothing runs and wk test exits DOCKER_NEEDED; a Linux image that won't build exits IMAGE_FAILED, also running
+can't, nothing runs and nh test exits DOCKER_NEEDED; a Linux image that won't build exits IMAGE_FAILED, also running
 nothing. --local runs here; Linux and repos without the file run here.
 """
 
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 from . import core, settings
-from .core import WorkkitError
+from .core import KitError
 
 MAPS = ("AGENTS.md", "CONTRIBUTING.md")  # where a repo keeps its map
 DOCKERFILE = "wk-test.Dockerfile"  # a repo opts in to Linux runs by keeping its image here
@@ -120,7 +120,7 @@ def changed(top: Path, base: str) -> list[str]:
     a file moved out of a mapped area keeps its check."""
     ref = f"origin/{base}"
     if not core.git(top, "rev-parse", "--verify", "--quiet", ref, check=False):
-        raise WorkkitError(f"No {ref} here: git fetch origin first")
+        raise KitError(f"No {ref} here: git fetch origin first")
     fork = core.git(top, "merge-base", ref, "HEAD")
     files = core.git(top, "diff", "--name-only", "--no-renames", fork).splitlines()
     return sorted({f.strip() for f in files if f.strip() and not f.startswith(".work/")})
@@ -150,41 +150,41 @@ def where(top: Path, local: bool = False, platform: str = sys.platform, which=sh
     if platform.startswith("linux"):
         return None, ""
     if local:
-        return None, "wk test: running here (--local)"
+        return None, "nh test: running here (--local)"
     file = top / DOCKERFILE
     if not file.is_file():
-        return None, f"wk test: running here: this repo has no {DOCKERFILE}"
+        return None, f"nh test: running here: this repo has no {DOCKERFILE}"
     state = docker_state(which, run)
     if state == "isn't installed":
-        raise DockerNeeded(f"Docker isn't installed: {install_line(platform)}, open it once, then run wk test again")
+        raise DockerNeeded(f"Docker isn't installed: {install_line(platform)}, open it once, then run nh test again")
     if state != "running" and not start_docker(platform, run):
-        raise DockerNeeded("Docker isn't running and couldn't be started: start Docker Desktop, then run wk test again")
+        raise DockerNeeded("Docker isn't running and couldn't be started: start Docker Desktop, then run nh test again")
     tag = "wk-test:" + hashlib.sha256(file.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:12]
     if run(["docker", "image", "inspect", "--format", "{{.Id}}", tag], 30).returncode:
-        print(f"wk test: building the Linux image {tag} from {DOCKERFILE} (once per change to that file)", flush=True)
+        print(f"nh test: building the Linux image {tag} from {DOCKERFILE} (once per change to that file)", flush=True)
         with tempfile.TemporaryDirectory() as empty:  # the image needs no files from the repo
             built = run(["docker", "build", "-q", "-t", tag, "-f", str(file), empty], 900)
         if built.returncode:
             last = ((built.stderr or built.stdout or "").strip().splitlines() or ["failed"])[-1]
-            raise ImageFailed(f"the Linux image didn't build ({last}): fix {DOCKERFILE}, then run wk test again")
+            raise ImageFailed(f"the Linux image didn't build ({last}): fix {DOCKERFILE}, then run nh test again")
         listed = run(["docker", "images", IMAGE, "--format", "{{.Repository}}:{{.Tag}}"], 30)
         old = [t for t in (listed.stdout or "").split() if t.startswith(IMAGE + ":") and t != tag]
         if old:  # one image kept on disk; one still in use by a running check stays (rmi refuses it)
             run(["docker", "rmi", *old], 120)
-    return tag, f"wk test: running in Linux (Docker image {tag})"
+    return tag, f"nh test: running in Linux (Docker image {tag})"
 
 
 IMAGE = "wk-test"
-DOCKER_NEEDED = 4  # wk test's exit code when Docker can't be used: not a test failure (1) or an error (2)
-WAIT = 120.0  # how long wk test waits for a Docker Desktop it started
+DOCKER_NEEDED = 4  # nh test's exit code when Docker can't be used: not a test failure (1) or an error (2)
+WAIT = 120.0  # how long nh test waits for a Docker Desktop it started
 
 
-class DockerNeeded(WorkkitError):
+class DockerNeeded(KitError):
     """Tests run only in Linux on this laptop, and Docker can't be used: the one line naming what is needed."""
     code = DOCKER_NEEDED
 
 
-IMAGE_FAILED = 5  # wk test's exit code when the Linux image didn't build: nothing runs on this laptop instead
+IMAGE_FAILED = 5  # nh test's exit code when the Linux image didn't build: nothing runs on this laptop instead
 
 
 class ImageFailed(DockerNeeded):
@@ -227,23 +227,23 @@ def start_docker(platform: str = sys.platform, run=None, launch=_launch, sleep=t
     builders and projects: this only ever starts it."""
     run = run or core.run
     if platform == "darwin":
-        print(f"wk test: Docker isn't running: starting Docker Desktop, waiting up to {wait:g}s", flush=True)
+        print(f"nh test: Docker isn't running: starting Docker Desktop, waiting up to {wait:g}s", flush=True)
         launch(["open", "-a", "Docker"])
     elif platform == "win32":
         if _desktop_open(run):
-            print(f"wk test: Docker Desktop is open but its engine isn't answering: waiting up to {wait:g}s", flush=True)
+            print(f"nh test: Docker Desktop is open but its engine isn't answering: waiting up to {wait:g}s", flush=True)
         else:
             app = desktop_app(env)
             if not app:
                 return False
-            print(f"wk test: Docker isn't running: starting Docker Desktop, waiting up to {wait:g}s", flush=True)
+            print(f"nh test: Docker isn't running: starting Docker Desktop, waiting up to {wait:g}s", flush=True)
             launch([str(app)])
     else:
         return False
     end = clock() + wait
     while True:
         if not run(["docker", "info", "--format", "{{.ServerVersion}}"], 15).returncode:
-            print("wk test: Docker is running", flush=True)
+            print("nh test: Docker is running", flush=True)
             return True
         if clock() >= end:
             return False
@@ -251,7 +251,7 @@ def start_docker(platform: str = sys.platform, run=None, launch=_launch, sleep=t
 
 
 def docker_state(which=shutil.which, run=None) -> str:
-    """'running', "isn't installed" or "isn't running": whether wk test can use Docker on this laptop."""
+    """'running', "isn't installed" or "isn't running": whether nh test can use Docker on this laptop."""
     if not which("docker"):
         return "isn't installed"
     return "running" if not (run or core.run)(["docker", "info", "--format", "{{.ServerVersion}}"], 30).returncode \
@@ -296,20 +296,20 @@ def run(cwd: Path, s: dict, dry: bool = False, timeout: float = 3600.0, modules:
     rows = rows_of(top)
     if modules:
         p = {"commands": [" ".join(UNITTEST + tuple(modules))], "full": []}
-        out = [f"wk test: {' '.join(modules)}"]
+        out = [f"nh test: {' '.join(modules)}"]
     elif not rows:
-        raise WorkkitError(f"No `## Change → check` map in {' or '.join(MAPS)} at {core.posix(top)}: run the nearest "
+        raise KitError(f"No `## Change → check` map in {' or '.join(MAPS)} at {core.posix(top)}: run the nearest "
                            "tests by hand")
     elif full:
         commands = list(dict.fromkeys(c for r in rows if r["kind"] == "full" for c in r["commands"]))
         if not commands:
-            raise WorkkitError("The map's full-run row names no command in backticks")
+            raise KitError("The map's full-run row names no command in backticks")
         p = {"commands": commands, "full": []}
-        out = ["wk test: the full run"]
+        out = ["nh test: the full run"]
     else:
         base = settings.base_of(s, top)
         p = plan(changed(top, base), rows)
-        out = [f"wk test: {len(p['files'])} changed file(s) against origin/{base}"]
+        out = [f"nh test: {len(p['files'])} changed file(s) against origin/{base}"]
         out += [f"- {', '.join(m['files'])}: {m['check']}" for m in p["matched"]]
         out += [f"full run needed: {x}" for x in p["full"]]
     out += [f"run: {c}" for c in p["commands"]] or ["run: nothing (no mapped command)"]
@@ -319,7 +319,7 @@ def run(cwd: Path, s: dict, dry: bool = False, timeout: float = 3600.0, modules:
     try:
         image, why = where(top, local) if p["commands"] else (None, "")
     except DockerNeeded as exc:  # tests run only in Linux here: none run on this laptop
-        return exc.code, f"wk test: {exc}"
+        return exc.code, f"nh test: {exc}"
     if why:
         print(why, flush=True)
     failed = []
@@ -331,5 +331,5 @@ def run(cwd: Path, s: dict, dry: bool = False, timeout: float = 3600.0, modules:
         if done.returncode:
             failed.append(c)
     summary = ("FAILED: " + "; ".join(failed)) if failed else "passed" if p["commands"] else "nothing to run"
-    tail = f"\nwk test: {summary}" + ("; full run needed (see above)" if p["full"] else "")
+    tail = f"\nnh test: {summary}" + ("; full run needed (see above)" if p["full"] else "")
     return (1 if failed or p["full"] else 0), tail

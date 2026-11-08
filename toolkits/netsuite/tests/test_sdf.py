@@ -47,8 +47,8 @@ def refuses(test, fn, *args):
 
 
 class FakeEngine:
-    """Stands in for work-kit's wk and for gh. wk refuses (exit 1) any command starting with one of `refuse`;
-    `turns` is what `wk --json turn list sandbox` prints; `pr` is what `gh pr view` returns."""
+    """Stands in for the kit's wk and for gh. wk refuses (exit 1) any command starting with one of `refuse`;
+    `turns` is what `nh --json turn list sandbox` prints; `pr` is what `gh pr view` returns."""
 
     def __init__(self, refuse=(), turns=(), pr=None):
         self.calls, self.refuse, self.turns, self.pr = [], [tuple(r) for r in refuse], list(turns), pr
@@ -58,7 +58,7 @@ class FakeEngine:
         if args[:3] == ("--json", "turn", "list"):
             return 0, json.dumps(self.turns)
         if any(args[:len(r)] == r for r in self.refuse):
-            return 1, f"wk: refused: {' '.join(args)}"
+            return 1, f"nh: refused: {' '.join(args)}"
         if args[:2] == ("gate", "approved"):   # like wk: it names the comment it accepted (the approver's line)
             ok = [c for c in (self.pr or {}).get("comments", []) if c.get("body", "").startswith("Approved by Owner:")]
             return 0, json.dumps({"ok": True, "comment": ok[-1].get("url", "") if ok else ""})
@@ -84,7 +84,7 @@ def merged_pr(merge, head, action="deploy", extra="", approver="Owner"):
 
 
 def approval(pr, extra=""):
-    """The approval release_compare gets once wk gate approved has passed for PR #pr."""
+    """The approval release_compare gets once nh gate approved has passed for PR #pr."""
     return {"label": f"PR #{pr}", "text": f"Approved by Owner: deploy to production @ abc1234\n{extra}", "pr": pr}
 
 
@@ -415,9 +415,9 @@ class ConfigTest(unittest.TestCase):
             Path(tmp, "sdf.toml").unlink()
             self.assertIn("no sdf.toml", refuses(self, sdf.configure, tmp))
 
-    def test_an_older_work_kit_refuses(self):
+    def test_an_older_nh_kit_refuses(self):
         with mock.patch.dict(sdf.CONFIG, {"requires": "99.0.0"}):
-            self.assertIn("needs work-kit 99.0.0 or newer", sdf.kit_refusal())
+            self.assertIn("needs nearly-headless 99.0.0 or newer", sdf.kit_refusal())
         with mock.patch.dict(sdf.CONFIG, {"requires": sdf.kit_version()}):
             self.assertIsNone(sdf.kit_refusal())
 
@@ -643,7 +643,7 @@ class ReleaseAncestryTest(GitRepoTest):
         code, out, cli = self.run_main("deploy", "prod", "--pr", "17", "--dryrun", engine=engine)
         self.assertEqual(code, 1)
         self.assertIn("production runs releases this commit does not contain", out)
-        self.assertIn("wk gate release: wk: refused", out)
+        self.assertIn("nh gate release: nh: refused", out)
         cli.assert_not_called()
 
 
@@ -776,7 +776,7 @@ class ChangeScopeTest(GitRepoTest):
     def run_main(self, *argv, engine=None):
         err, out = io.StringIO(), io.StringIO()
         sent = {}
-        self.engine = engine or FakeEngine()   # wk turn check passes: this branch holds the turn
+        self.engine = engine or FakeEngine()   # nh turn check passes: this branch holds the turn
         def cli(args, auth_id=None, **kw):
             sent["deploy.xml"] = (self.root / "src" / "deploy.xml").read_text(encoding="utf-8")
             return 0, ""
@@ -942,7 +942,7 @@ class ProdFromMainTest(GitRepoTest):
                                           capture_output=True, text=True).stdout)
 
     def test_the_approval_names_the_pr_head_not_the_merge_commit(self):
-        """After the merge main's HEAD is the merge commit; the approval still names the PR's head (wk gate approved
+        """After the merge main's HEAD is the merge commit; the approval still names the PR's head (nh gate approved
         checks it against headRefOid), and sdf.py checks that the merge is in HEAD."""
         self.assertNotEqual(self.merge, self.pr_head)
         code, out, _ = self.deploy(FakeEngine(pr=merged_pr(self.merge, self.pr_head)), "--pr", "7")
@@ -983,7 +983,7 @@ class ProdFromMainTest(GitRepoTest):
         engine = FakeEngine(refuse=[("gate", "approved")], pr=merged_pr(self.merge, self.pr_head))
         code, out, cli = self.deploy(engine, "--pr", "7")
         self.assertEqual(code, 2)
-        self.assertIn("wk gate approved --pr 7 --action deploy to production: wk: refused", out)
+        self.assertIn("nh gate approved --pr 7 --action deploy to production: nh: refused", out)
         cli.assert_not_called()
 
     def test_upload_asks_for_the_upload_approval(self):
@@ -1014,7 +1014,7 @@ class ProdFromMainTest(GitRepoTest):
 
     def test_only_the_comment_wk_accepted_counts(self):
         """Another commenter's look-alike approval, or a quote of the line with an 'Includes', widens nothing: only the
-        comment wk gate approved accepted (the configured approver's line at the PR head) is read."""
+        comment nh gate approved accepted (the configured approver's line at the PR head) is read."""
         self.run_git("checkout", "-q", "-b", "v2")
         self.commit(self.PNL, "pnl v2", "P&L v2")
         head = self.run_git("rev-parse", "HEAD")
@@ -1151,7 +1151,7 @@ class SandboxTurnTest(GitRepoTest):
         engine = FakeEngine(refuse=[("turn", "check")])
         code, out, cli = self.run_main("deploy", "sb", engine=engine)
         self.assertEqual(code, 2)
-        self.assertIn(f"  wk turn take sandbox {self.PNL} {self.PNL_XML}", out)
+        self.assertIn(f"  nh turn take sandbox {self.PNL} {self.PNL_XML}", out)
         self.assertIn("py tools/sdf.py release sb", out)
         cli.assert_not_called()
 
@@ -1186,21 +1186,21 @@ class SandboxTurnTest(GitRepoTest):
 
 
 class WkCommandTest(unittest.TestCase):
-    """sdf.py always runs work-kit's wk as `python -m wk` from the work-kit checkout: the one on PATH, else
-    C:/Projects/work-kit."""
+    """sdf.py always runs the kit's wk as `python -m wk` from the nearly-headless checkout: the one on PATH, else
+    C:/Projects/nearly-headless."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.home = self.checkout("work-kit", work_kit=True)
+        self.home = self.checkout("nearly-headless", nh_kit=True)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def checkout(self, name, work_kit):
+    def checkout(self, name, nh_kit):
         home = Path(self.tmp.name) / name
         (home / "bin").mkdir(parents=True)
         (home / "bin" / "wk.cmd").write_text("@echo off\n")
-        if work_kit:
+        if nh_kit:
             (home / "wk").mkdir()
             (home / "wk" / "__main__.py").write_text("")
             (home / "wk" / "turns.py").write_text("")
@@ -1209,34 +1209,34 @@ class WkCommandTest(unittest.TestCase):
             (home / "tools" / "wk.py").write_text("")
         return home
 
-    def test_the_work_kit_on_path_runs_as_python_module(self):
+    def test_the_nh_kit_on_path_runs_as_python_module(self):
         with mock.patch.object(sdf.shutil, "which", return_value=str(self.home / "bin" / "wk.cmd")), \
-                mock.patch.object(sdf, "WORK_KIT", Path(self.tmp.name) / "nope"):
+                mock.patch.object(sdf, "NH_KIT", Path(self.tmp.name) / "nope"):
             cmd, env = sdf.wk_command()
         self.assertEqual(cmd, [sys.executable, "-m", "wk"])
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], str(self.home.resolve()))
 
     def test_another_wk_on_path_is_never_run(self):
-        """A wk.cmd on PATH that is not work-kit (the old command center's) is skipped, never run through cmd.exe."""
-        old = self.checkout("command-center", work_kit=False)
+        """A wk.cmd on PATH that is not nearly-headless (the old command center's) is skipped, never run through cmd.exe."""
+        old = self.checkout("command-center", nh_kit=False)
         with mock.patch.object(sdf.shutil, "which", return_value=str(old / "bin" / "wk.cmd")), \
-                mock.patch.object(sdf, "WORK_KIT", self.home):
+                mock.patch.object(sdf, "NH_KIT", self.home):
             cmd, env = sdf.wk_command()
         self.assertEqual(cmd, [sys.executable, "-m", "wk"])
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], str(self.home))
         with mock.patch.object(sdf.shutil, "which", return_value=str(old / "bin" / "wk.cmd")), \
-                mock.patch.object(sdf, "WORK_KIT", Path(self.tmp.name) / "nope"):
-            self.assertIn("work-kit was not found", refuses(self, sdf.wk_command))
+                mock.patch.object(sdf, "NH_KIT", Path(self.tmp.name) / "nope"):
+            self.assertIn("nearly-headless was not found", refuses(self, sdf.wk_command))
 
     def test_the_default_checkout_when_not_on_path(self):
-        with mock.patch.object(sdf.shutil, "which", return_value=None), mock.patch.object(sdf, "WORK_KIT", self.home):
+        with mock.patch.object(sdf.shutil, "which", return_value=None), mock.patch.object(sdf, "NH_KIT", self.home):
             self.assertEqual(sdf.wk_command()[0], [sys.executable, "-m", "wk"])
 
-    def test_missing_work_kit_fails_clearly(self):
+    def test_missing_nh_kit_fails_clearly(self):
         with mock.patch.object(sdf.shutil, "which", return_value=None), \
-                mock.patch.object(sdf, "WORK_KIT", Path(self.tmp.name) / "nope"):
+                mock.patch.object(sdf, "NH_KIT", Path(self.tmp.name) / "nope"):
             msg = refuses(self, sdf.wk, "turn", "list")
-        self.assertIn("work-kit was not found", msg)
+        self.assertIn("nearly-headless was not found", msg)
 
 
 class ReleaseSandboxTest(GitRepoTest):
@@ -1340,14 +1340,14 @@ class ReleaseSandboxTest(GitRepoTest):
         self.assertIn(("turn", "release", "sandbox", self.NEW), engine.calls)
 
 
-def work_kit_found():
+def nh_kit_found():
     found = shutil.which("wk")
-    return any(sdf.is_work_kit(h) for h in ([Path(found).resolve().parent.parent] if found else []) + [sdf.WORK_KIT])
+    return any(sdf.is_nh_kit(h) for h in ([Path(found).resolve().parent.parent] if found else []) + [sdf.NH_KIT])
 
 
-@unittest.skipUnless(work_kit_found(), "work-kit is not on this machine (CI)")
+@unittest.skipUnless(nh_kit_found(), "nearly-headless is not on this machine (CI)")
 class RealEngineTest(GitRepoTest):
-    """sdf.py against work-kit's real wk in a throwaway repo: turns are per file and per branch."""
+    """sdf.py against the kit's real wk in a throwaway repo: turns are per file and per branch."""
 
     def setUp(self):
         super().setUp()
@@ -1568,12 +1568,12 @@ class StrictConfigTest(unittest.TestCase):
 
 
 class KitCheckoutTest(unittest.TestCase):
-    """Production runs only a released kit: clean, and on work-kit's origin/main (should-fix 2)."""
+    """Production runs only a released kit: clean, and on the kit's origin/main (should-fix 2)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
-        self.origin, self.home = base / "origin.git", base / "work-kit"
+        self.origin, self.home = base / "origin.git", base / "nearly-headless"
         self.git("init", "-q", "--bare", "-b", "main", str(self.origin), cwd=base)
         self.git("clone", "-q", str(self.origin), str(self.home), cwd=base)
         self.write("toolkits/netsuite/sdf.py", "kit 1")
@@ -1584,7 +1584,7 @@ class KitCheckoutTest(unittest.TestCase):
         self.git("push", "-q", "origin", "main")
         self.wk_home = self.home   # the wk on PATH is this checkout's, unless a test makes another
         self.patches = [mock.patch.object(sdf, "KIT_HOME", self.home),
-                        mock.patch.object(sdf, "work_kit_home", side_effect=lambda: self.wk_home)]
+                        mock.patch.object(sdf, "nh_kit_home", side_effect=lambda: self.wk_home)]
         for p in self.patches:
             p.start()
 
@@ -1602,8 +1602,8 @@ class KitCheckoutTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
-    def installed_work_kit(self):
-        """A second clone of work-kit, as the installed one whose wk runs the gates."""
+    def installed_nh_kit(self):
+        """A second clone of nearly-headless, as the installed one whose wk runs the gates."""
         self.wk_home = Path(self.tmp.name) / "installed"
         self.git("clone", "-q", "-b", "main", str(self.origin), str(self.wk_home), cwd=self.tmp.name)
         return self.wk_home
@@ -1612,24 +1612,24 @@ class KitCheckoutTest(unittest.TestCase):
         self.write("wk/gates.py", "gates edited")
         self.assertIn("uncommitted changes", sdf.kit_checkout_refusal())
 
-    def test_the_installed_work_kit_is_checked_when_it_is_another_checkout(self):
-        home = self.installed_work_kit()
+    def test_the_installed_nh_kit_is_checked_when_it_is_another_checkout(self):
+        home = self.installed_nh_kit()
         self.assertIsNone(sdf.kit_checkout_refusal())
         self.write("wk/gates.py", "gates edited", home)
         msg = sdf.kit_checkout_refusal()
-        self.assertIn(f"work-kit (its wk runs the production gates) at {home.resolve().as_posix()} has uncommitted", msg)
+        self.assertIn(f"nearly-headless (its wk runs the production gates) at {home.resolve().as_posix()} has uncommitted", msg)
         self.git("checkout", "--", ".", cwd=home)
         self.git("switch", "-q", "-c", "feature", cwd=home)
         self.write("wk/gates.py", "gates 2", home)
         self.git("commit", "-q", "-am", "unreleased gates", cwd=home)
-        self.assertIn("on 'feature', which is not in work-kit's origin/main", sdf.kit_checkout_refusal())
+        self.assertIn("on 'feature', which is not in the kit's origin/main", sdf.kit_checkout_refusal())
 
     def test_the_kits_own_checkout_is_still_checked_beside_the_installed_one(self):
-        self.installed_work_kit()
+        self.installed_nh_kit()
         self.write("toolkits/netsuite/sdf.py", "edited")
         msg = sdf.kit_checkout_refusal()
         self.assertIn(f"the SDF kit at {self.home.resolve().as_posix()} has uncommitted changes", msg)
-        self.assertNotIn("work-kit (its wk", msg)
+        self.assertNotIn("nearly-headless (its wk", msg)
 
     def test_a_clean_kit_on_main_passes(self):
         self.assertIsNone(sdf.kit_checkout_refusal())
@@ -1646,13 +1646,13 @@ class KitCheckoutTest(unittest.TestCase):
         self.write("toolkits/netsuite/sdf.py", "kit 2")
         self.git("commit", "-q", "-am", "unreleased kit")
         msg = sdf.kit_checkout_refusal()
-        self.assertIn("on 'feature', which is not in work-kit's origin/main", msg)
-        self.assertIn("wk update", msg)
+        self.assertIn("on 'feature', which is not in the kit's origin/main", msg)
+        self.assertIn("nh update", msg)
 
     def test_main_ahead_only_by_its_records_passes(self):
         self.write(".work/list.tsv", "a piece")
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", "wk: record")
+        self.git("commit", "-q", "-m", "nh: record")
         self.assertIsNone(sdf.kit_checkout_refusal())
 
     def test_the_dry_run_lists_it_with_the_other_gates(self):

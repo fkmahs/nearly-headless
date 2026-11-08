@@ -1,4 +1,4 @@
-"""The invoicing toolkit against a real work-kit: a client repo with .work/ hours and its billing/ record, pushed to a
+"""The invoicing toolkit against a real nearly-headless: a client repo with .work/ hours and its billing/ record, pushed to a
 bare origin."""
 
 import io
@@ -30,9 +30,9 @@ class Fixture(unittest.TestCase):
         self.settings = self.tmp / "settings.toml"
         self.settings.write_text('owner = "Pat Lee"\n', encoding="utf-8")
         (self.tmp / "profile.json").write_text(json.dumps(PROFILE), encoding="utf-8")
-        # no daily self-update: it would fetch from GitHub, and could change work-kit, in the middle of a test
-        self.env = {"WORKKIT_HOME": str(KIT), "WORKKIT_SETTINGS": str(self.settings),
-                    "INVOICING_PROFILE": str(self.tmp / "profile.json"), "WORKKIT_AUTO_UPDATE": "0"}
+        # no daily self-update: it would fetch from GitHub, and could change nearly-headless, in the middle of a test
+        self.env = {"NH_HOME": str(KIT), "NH_SETTINGS": str(self.settings),
+                    "INVOICING_PROFILE": str(self.tmp / "profile.json"), "NH_AUTO_UPDATE": "0"}
         self.old_env = {k: os.environ.get(k) for k in self.env}
         os.environ.update(self.env)
 
@@ -249,7 +249,7 @@ class Coverage(Acme):
         super().setUp()
         self.wk("piece", "add", "acme", "reports", "Aged debt report")
         self.wk("piece", "set", "acme", "reports", "P2", "--state", self.FINISH, *(["--pr", "1"] * (self.FINISH == "merged")))
-        # the day work-kit recorded it finished, not this process's clock, so a run across midnight still agrees
+        # the day nearly-headless recorded it finished, not this process's clock, so a run across midnight still agrees
         pieces = invoice.wk("piece", "list", "acme", "reports", "--all")
         self.today = next(x for x in pieces if x["id"] == "P2")["finished"]
 
@@ -322,7 +322,7 @@ class Coverage(Acme):
 
     def test_a_later_piece_with_unbilled_hours_is_a_problem(self):
         self.wk("hours", "add", "acme", "reports", "1", "--note", "Aged debt", "--date", "2026-10-22", "--for", "P2")
-        self.backdate("P2", "bill", "later")  # as an older work-kit or a hand edit could leave it
+        self.backdate("P2", "bill", "later")  # as an older nearly-headless or a hand edit could leave it
         self.assertIn("P2: Aged debt report is marked bill later but has unbilled hours",
                       " ".join(invoice.preview(self.c, self.today)["problems"]))
 

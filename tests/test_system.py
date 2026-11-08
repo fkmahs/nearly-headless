@@ -1,4 +1,4 @@
-"""The work-kit page's parts (wk/system.py): hooks, roles and settings come from the real sources, never stale text.
+"""The nearly-headless page's parts (wk/system.py): hooks, roles and settings come from the real sources, never stale text.
 Claude's and Codex's folders are temp folders; the real ~/.claude is never read or written."""
 
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import cli, dashboard, system, upkeep  # noqa: E402
 
@@ -39,17 +39,17 @@ class System(unittest.TestCase):
         self.assertTrue(all(h["on"] is False for h in system.hooks({})))  # nothing installed yet
         self.setup_laptop()
         written = json.loads((self.claude / "settings.json").read_text(encoding="utf-8"))["hooks"]
-        pairs = {(event, g.get("matcher"), h["command"].rsplit("/bin/wk\" ", 1)[1])
+        pairs = {(event, g.get("matcher"), h["command"].rsplit("/bin/nh\" ", 1)[1])
                  for event, groups in written.items() for g in groups for h in g["hooks"]}
         self.assertEqual(pairs, set(upkeep.HOOKS))  # the page lists exactly what setup installs
         shown = system.hooks({})
         self.assertEqual([(h["event"], h["matcher"] or None, h["command"]) for h in shown],
-                         [(e, m, "wk " + c) for e, m, c in upkeep.HOOKS])
+                         [(e, m, "nh " + c) for e, m, c in upkeep.HOOKS])
         self.assertTrue(all(h["on"] for h in shown))
         # the reminder waits for reply parts; the reply check also records support work, on unless record = false
-        self.assertEqual([h["command"] for h in shown if h["idle"]], ["wk reply-check --remind"])
+        self.assertEqual([h["command"] for h in shown if h["idle"]], ["nh reply-check --remind"])
         self.assertEqual([h["command"] for h in system.hooks({"reply": {"record": False}}) if h["idle"]],
-                         ["wk reply-check --remind", "wk reply-check"])
+                         ["nh reply-check --remind", "nh reply-check"])
         self.assertFalse(any(h["idle"] for h in system.hooks({"reply": {"require": ["Since you wrote:"]}})))
         stop = lambda s: {c["name"]: c["on"] for c in system.hooks(s)[-1]["checks"]}  # noqa: E731
         self.assertEqual(stop({}), {"Required reply parts": False, "Support work recorded": True})
@@ -60,7 +60,7 @@ class System(unittest.TestCase):
         # one hook taken out of Claude's settings shows as missing; a file that can't be read, as unknown
         written["Stop"] = []
         (self.claude / "settings.json").write_text(json.dumps({"hooks": written}), encoding="utf-8")
-        self.assertEqual([h["command"] for h in system.hooks({}) if not h["on"]], ["wk reply-check"])
+        self.assertEqual([h["command"] for h in system.hooks({}) if not h["on"]], ["nh reply-check"])
         (self.claude / "settings.json").write_text("[1]", encoding="utf-8")
         self.assertTrue(all(h["on"] is None for h in system.hooks({})))
 
@@ -74,7 +74,7 @@ class System(unittest.TestCase):
         self.assertTrue(all(t in roles for r in roles.values() for t in r["to"]))  # every hand-off goes somewhere
         desc = (KIT / "skills" / "builder" / "SKILL.md").read_text(encoding="utf-8").split("description: ", 1)[1]
         self.assertEqual(roles["builder"]["detail"], desc.split("\n", 1)[0].strip())
-        self.assertEqual(roles["builder"]["state"], "current")  # installed by setup, identical to work-kit's copy
+        self.assertEqual(roles["builder"]["state"], "current")  # installed by setup, identical to the kit's copy
         self.assertIn("builders_per_list", roles["queue"]["detail"])  # the approved queue section of moving.md
         self.assertIn("Sonnet", roles["reviewer"]["detail"])  # the review section of merge.md
         check = next(a for a in cli.parser()._actions if a.dest == "cmd").choices["check"]

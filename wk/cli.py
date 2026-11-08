@@ -1,4 +1,4 @@
-"""wk: the work-kit command line. Exit status 0 = done, 1 = refused (a gate or turn said no) or wk check found
+"""nh: the nearly-headless command line. Exit status 0 = done, 1 = refused (a gate or turn said no) or nh check found
 problems, 2 = error,
 3 = recorded but not on GitHub (push failed)."""
 
@@ -11,9 +11,9 @@ import sys
 from pathlib import Path
 
 from . import __version__, core
-from .core import WorkkitError
+from .core import KitError
 
-# Every other module loads only when a command needs it, so `wk update`, `wk version`, `recall` and `reply-check`
+# Every other module loads only when a command needs it, so `nh update`, `nh version`, `recall` and `reply-check`
 # still run when an unrelated module is broken: a broken release never blocks its own repair. So the parser names
 # these values itself; a test keeps each equal to its module's.
 TURN_HOURS = 2.0  # turns.HOURS
@@ -22,12 +22,12 @@ BILL_CHOICES = ["yes", "later", "no"]  # work.BILL
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="wk", description=__doc__)
+    p = argparse.ArgumentParser(prog="nh", description=__doc__)
     p.add_argument("--settings", type=Path,
-                   help="this laptop's settings file (default: $WORKKIT_SETTINGS, else ~/.workkit/settings.toml)")
+                   help="this laptop's settings file (default: $NH_SETTINGS, else ~/.nearly-headless/settings.toml)")
     p.add_argument("--cwd", type=Path, default=Path.cwd(), help="checkout to act as (default: current folder)")
     p.add_argument("--json", action="store_true", help="print JSON instead of a table where a table is the default")
-    p.add_argument("--version", action="version", version=__version__, help="print the work-kit version and stop")
+    p.add_argument("--version", action="version", version=__version__, help="print the nearly-headless version and stop")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("turn", help="Take turns on a shared resource, in any repo (exit 1 = refused)",
@@ -45,8 +45,9 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("gate", help="Release gates for any repo (exit 0 = pass, 1 = refused)",
                        description="release: passes only on the base branch, with a clean tree, at origin/<base> after "
                                    "a fetch. approved: passes only when a PR comment has its own line "
-                                   "'Approved by <approver>: <action> @ <sha>' (case-insensitive; <sha> is at least 7 "
-                                   "characters of the PR's current head; on a public repo <approver> is 'the owner'). "
+                                   "'Approved by the owner: <action> @ <sha>' (case-insensitive; <sha> is at least 7 "
+                                   "characters of the PR's current head; on a private repo the approver's name from "
+                                   "the settings, as approvals before 1.56.0 read, also counts). "
                                    "Any new push voids it. fresh: passes only when the PR "
                                    "already holds every change origin/<base> has had, since the PR's branch last took "
                                    "it, to the files the PR changes (PRs on other files never wait), and, with --sha "
@@ -64,7 +65,7 @@ def parser() -> argparse.ArgumentParser:
                                    "PR's CI, post 'Ready @ <sha>' and print the new sha. A conflict, uncommitted "
                                    "changes, unpushed work, a change needing the full run (.github/workflows/ or the map's full-run row), a latest Ready that isn't 'Gap checks: none', or failing CI (a verdict counts when two polls in a "
                                    "row agree): change nothing (a conflict's merge is "
-                                   "aborted) and say the builder is needed. Run it before wk gate fresh.")
+                                   "aborted) and say the builder is needed. Run it before nh gate fresh.")
     s.add_argument("--pr", type=int, required=True, help="the pull request number")
     s.add_argument("--wait", type=float, default=30.0, help="minutes to wait for CI (default 30)")
 
@@ -130,7 +131,7 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("channels", help="A client's channels file for the routing run (show; move a channel's "
                                         "last-checked time)",
-                       description="Prints .work/communication_channels.md, starting it from work-kit's template if "
+                       description="Prints .work/communication_channels.md, starting it from the kit's template if "
                                    "missing and saving any hand edits, then each channel's last-checked time on this "
                                    "laptop and the time to read it from (that time less a short overlap). Otherwise "
                                    "it writes nothing. --checked with --at moves one channel's last-checked time: "
@@ -197,7 +198,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--again", action="store_true", help="separate work on a day that already has hours")
     s.add_argument("--for", dest="pieces", help="add/fix: the pieces the hours pay for, e.g. P3,P7")
     s.add_argument("--line-key", dest="line_key", help="add/fix: the list's named invoice line these hours bill on "
-                                                      "(wk product set --line key=...); fix: \"\" for its usual line")
+                                                      "(nh product set --line key=...); fix: \"\" for its usual line")
     s.add_argument("--was", default="", help="fix: words from the entry's note, when the day has several")
     s.add_argument("--remove", action="store_true", help="fix: remove the entry")
     s.add_argument("--unbilled", action="store_true")
@@ -221,7 +222,7 @@ def parser() -> argparse.ArgumentParser:
                                "In a chat that loaded the supervisor skill: when the settings file lists [reply] "
                                "require = [\"...\", ...], a last message missing one of them is sent back once to be "
                                "rewritten; and, unless [reply] record = false, a turn that drafted a message, "
-                               "investigated or reviewed a document for the owner but ran no wk piece add or wk piece "
+                               "investigated or reviewed a document for the owner but ran no nh piece add or nh piece "
                                "note is sent back once to record it. Anything else is let through. One line per check goes to "
                                "reply-check.log "
                                "beside the settings file. Always exits 0.")
@@ -230,10 +231,10 @@ def parser() -> argparse.ArgumentParser:
                         "are set), so the reply is right the first time")
 
     s = sub.add_parser("health", help="Is the system healthier on tokens? One table by period, per day, with the "
-                                      "work-kit version live and a verdict per measure (read-only)",
+                                      "nearly-headless version live and a verdict per measure (read-only)",
                        description="Read-only, over every Claude Code transcript on this laptop: tokens by type, "
                                    "calls, context per call, agent runs, wake-ups, reviews, merged PRs, reply-check "
-                                   "rejections and wk refresh uses, for today so far, yesterday, this week, last week "
+                                   "rejections and nh refresh uses, for today so far, yesterday, this week, last week "
                                    "and the previous N full days, each per day, with healthier / worse / flat against "
                                    "the period before.")
     s.add_argument("--days", type=int, default=14, help="the long period's length in full days (default 14)")
@@ -242,10 +243,10 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="Open the command center: a local page showing every repo in the settings")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--save", type=Path, help="write the page once to this file, after checking GitHub, and stop")
-    s.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)  # started by wk serve itself
+    s.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)  # started by nh serve itself
     s = sub.add_parser("privacy", help="The privacy guard: stop private names reaching a public repo (exit 1 = a "
                                        "private name was found; only where, never the name, is printed)",
-                       description="push: git's pre-push hook in a public checkout (wk setup installs it) checks the "
+                       description="push: git's pre-push hook in a public checkout (nh setup installs it) checks the "
                                    "branch, commit messages and added lines. scan FOLDER: every file in a folder. pr: "
                                    "the GitHub job, from the PRIVATE_TERMS secret. secret OWNER/REPO: sets that secret "
                                    "from this laptop's list. tree FOLDER: builds the clean public copy of this repo "
@@ -277,9 +278,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--plan", action="store_true", help="only say what it would run")
     s.add_argument("--full", action="store_true", help="run the map's full-run row (the whole suite) instead")
     s.add_argument("--local", action="store_true", help="run here, never in a container")
-    sub.add_parser("update", help="Move to the newest work-kit release and reinstall the skills")
+    sub.add_parser("update", help="Move to the newest nearly-headless release and reinstall the skills")
     sub.add_parser("doctor", help="Check settings, repos, skills and CI (exit 1 if anything is off)")
-    sub.add_parser("version", help="Print the work-kit version")
+    sub.add_parser("version", help="Print the nearly-headless version")
     return p
 
 
@@ -296,7 +297,7 @@ def _turn(args, cwd, s):
     from . import turns
     a, res, items = args.action, args.resource, args.items
     if a in ("take", "check") and not (res and items):
-        raise WorkkitError(f"wk turn {a} needs a resource and at least one item")
+        raise KitError(f"nh turn {a} needs a resource and at least one item")
     if a == "take":
         return turns.take(cwd, s, res, items, args.hours)
     if a == "renew":
@@ -316,10 +317,10 @@ def _gate(args, cwd, s):
         return turns.gate_release(cwd, s)
     if args.which == "fresh":
         if not args.pr:
-            raise WorkkitError("wk gate fresh needs --pr N")
+            raise KitError("nh gate fresh needs --pr N")
         return turns.gate_fresh(cwd, s, args.pr, args.sha)
     if not (args.pr and args.action):
-        raise WorkkitError("wk gate approved needs --pr N and --action \"...\"")
+        raise KitError("nh gate approved needs --pr N and --action \"...\"")
     return turns.gate_approved(cwd, s, args.pr, args.action)
 
 
@@ -330,7 +331,7 @@ def _product(args, s):
         return work.add_product(r, args.name or "", args.line or "")
     if args.action == "set":
         if not args.name:
-            raise WorkkitError("wk product set needs the product's name")
+            raise KitError("nh product set needs the product's name")
         return work.set_product(r, args.name, args.supervisor, args.title, args.line)
     products = r.products()
     return products, "\n".join(f"{p}: {v.get('line', '')}" + (f"  (supervisor: {v['supervisor']})"
@@ -346,9 +347,9 @@ def _piece(args, s):
         return work.add_piece(r, p, args.text or "")
     if args.action == "set":
         if not args.text:
-            raise WorkkitError("wk piece set needs the piece's id")
+            raise KitError("nh piece set needs the piece's id")
         if args.bill in ("later", "no") and not (args.reason or "").strip():
-            raise WorkkitError(f"Say why it is billed {'later' if args.bill == 'later' else 'not at all'} (--reason)")
+            raise KitError(f"Say why it is billed {'later' if args.bill == 'later' else 'not at all'} (--reason)")
         line = ""
         if args.bill:  # checked before the first write, so a refused note never leaves half a change
             said = {"yes": "Billed with its hours", "later": "Bill later", "no": "Not billing"}[args.bill]
@@ -370,7 +371,7 @@ def _piece(args, s):
         return q, "\n".join(work.queue_lines(q)) or "The queue is empty: nothing the owner approved waits to start"
     if args.action == "note":
         if not args.text:
-            raise WorkkitError("wk piece note needs the piece's id")
+            raise KitError("nh piece note needs the piece's id")
         if args.line or args.file:
             return work.note(r, p, args.text, args.line or "",
                              args.file.read_text(encoding="utf-8") if args.file else None,
@@ -390,16 +391,16 @@ def _question(args, s):
                         args.piece or "", args.list_wide)
     if args.action == "set":
         if len(args.text) != 1:
-            raise WorkkitError("wk question set needs the question's id: wk question set <repo> <product> Q2 "
+            raise KitError("nh question set needs the question's id: nh question set <repo> <product> Q2 "
                                "--piece P3 (or --list-wide)")
         return work.link_question(r, p, args.text[0], args.piece or "", args.list_wide)
     if args.action == "answer":
         if len(args.text) < 2:
-            raise WorkkitError("wk question answer needs the question's id and the owner's answer")
+            raise KitError("nh question answer needs the question's id and the owner's answer")
         return work.answer(r, p, args.text[0], " ".join(args.text[1:]))
     if args.action == "withdraw":
         if len(args.text) != 1:
-            raise WorkkitError("wk question withdraw needs the question's id and --reason \"...\"")
+            raise KitError("nh question withdraw needs the question's id and --reason \"...\"")
         return work.withdraw(r, p, args.text[0], args.reason or "", args.piece or "")
     items = work.questions(r, p)
     return items, "\n".join(f"{q['id']}  {q['question']}" + (f"  (recommended: {q['recommended']})"
@@ -414,7 +415,7 @@ def _order(args, s):
         return work.order(r, p, add=args.text or "")
     if args.action == "drop":
         if not (args.text or "").isdigit():
-            raise WorkkitError("wk order drop needs the order's number")
+            raise KitError("nh order drop needs the order's number")
         return work.order(r, p, drop=int(args.text))
     lines = work.orders(r, p)
     return lines, "\n".join(f"{n}. {t}" for n, t in enumerate(lines, 1)) or "No standing orders"
@@ -445,12 +446,12 @@ def _inbox(args, s):
             raise turns.Refused(f"Already filed ({where}): {work._clean(args.link)}")
         return {"link": work._clean(args.link), "filed": ""}, "new"
     if not args.product:
-        raise WorkkitError(f"wk inbox {args.action} needs the list: wk inbox {args.action} <repo> <list>")
+        raise KitError(f"nh inbox {args.action} needs the list: nh inbox {args.action} <repo> <list>")
     if args.action == "add":
         return work.inbox_add(r, args.product, text, args.link, args.channel, args.when, args.piece)
     if args.action == "done":
         if len(args.text) != 1:
-            raise WorkkitError("wk inbox done needs the entry's id: wk inbox done <repo> <list> I2 --how \"...\"")
+            raise KitError("nh inbox done needs the entry's id: nh inbox done <repo> <list> I2 --how \"...\"")
         return work.inbox_done(r, args.product, args.text[0], args.how)
     items = work.inbox(r, args.product)
     return items, "\n".join(f"{x['id']}  {x['line']}  ({x.get('channel', '')}"
@@ -477,14 +478,14 @@ def _check(args, s):
     from . import check
     if args.ack:
         if not args.repo:
-            raise WorkkitError("wk check --ack needs the repo: wk check <repo> --ack <sha> --reason \"...\"")
+            raise KitError("nh check --ack needs the repo: nh check <repo> --ack <sha> --reason \"...\"")
         return check.ack(s, args.repo, args.ack, args.reason or "")
     if args.fix_dates:
         if not (args.repo and args.product):
-            raise WorkkitError("wk check --fix-dates works on one list: wk check <repo> <product> --fix-dates")
+            raise KitError("nh check --fix-dates works on one list: nh check <repo> <product> --fix-dates")
         return check.fix_dates(s, args.repo, args.product)
     if args.dry_run and not args.fix:
-        raise WorkkitError("--dry-run goes with --fix: wk check [repo] [product] --fix --dry-run")
+        raise KitError("--dry-run goes with --fix: nh check [repo] [product] --fix --dry-run")
     changed = []
     if args.fix:
         changed, every = check.fix(s, args.repo, args.product, args.dry_run)
@@ -507,18 +508,18 @@ def _hours(args, s, cwd):
     from . import work
     if args.action == "add":
         if not (args.repo and args.product and args.hours is not None):
-            raise WorkkitError("wk hours add needs a repo, a product and the hours")
+            raise KitError("nh hours add needs a repo, a product and the hours")
         return work.add_hours(work.Repo(s, args.repo), cwd, args.product, args.hours, args.note or "", args.date,
                               args.again, args.pieces or "", args.line_key or "")
     if args.action == "fix":
         if not (args.repo and args.product and args.date):
-            raise WorkkitError("wk hours fix needs a repo, a product and --date (then the new hours, --note, --for, "
+            raise KitError("nh hours fix needs a repo, a product and --date (then the new hours, --note, --for, "
                                "--line-key or --remove)")
         return work.fix_hours(work.Repo(s, args.repo), args.product, args.date, args.hours, args.note, args.pieces,
                               args.remove, args.was, args.nth, args.line_key)
     if args.action == "mark":
         if not (args.repo and args.through and args.label and args.expect is not None):
-            raise WorkkitError("wk hours mark needs a repo, --through, --as and --expect (optionally a product)")
+            raise KitError("nh hours mark needs a repo, --through, --as and --expect (optionally a product)")
         return work.mark_hours(work.Repo(s, args.repo), args.through, args.label, args.expect,
                                [args.product] if args.product else [], args.digest)
     names = [args.repo] if args.repo else list(s.get("repos") or {})
@@ -588,13 +589,13 @@ def _privacy(args, cwd: Path) -> int:
         names = privacy.terms(s, args.term)
         if args.what == "secret":
             if len(args.rest) != 1 or not names:
-                raise WorkkitError("wk privacy secret OWNER/REPO, on a laptop whose settings name its repos")
+                raise KitError("nh privacy secret OWNER/REPO, on a laptop whose settings name its repos")
             print(json.dumps(privacy.set_secret(args.rest[0], names), indent=2))
             return 0
         pat = privacy.pattern(names)
         if args.what == "tree":
             if len(args.rest) != 1:
-                raise WorkkitError("wk privacy tree FOLDER [--ref REF], run in the repo's checkout")
+                raise KitError("nh privacy tree FOLDER [--ref REF], run in the repo's checkout")
             built = privacy.tree(core.checkout_of(cwd)[0], Path(args.rest[0]), args.ref)
             hits = privacy.scan(Path(args.rest[0]), pat)
             print(json.dumps(built | {"private_names": len(names), "hits": len(hits)}, indent=2))
@@ -603,7 +604,7 @@ def _privacy(args, cwd: Path) -> int:
             return 1 if hits else 0
         if args.what == "scan":
             if len(args.rest) != 1 or not Path(args.rest[0]).is_dir():
-                raise WorkkitError("wk privacy scan FOLDER")
+                raise KitError("nh privacy scan FOLDER")
             hits = privacy.scan(Path(args.rest[0]), pat)
             print(f"{len(hits)} hits in {core.posix(Path(args.rest[0]).resolve())} ({len(names)} private names)")
             out = sys.stdout
@@ -611,14 +612,14 @@ def _privacy(args, cwd: Path) -> int:
             hits = privacy.push_hits(cwd, sys.stdin.read(), pat)
             out = sys.stderr
             if hits:
-                print("wk privacy: push stopped: a private name is in", file=out)
+                print("nh privacy: push stopped: a private name is in", file=out)
         for h in hits:
             print(f"  {h}", file=out)
         if hits and args.what == "push":
             print("Reword those places (amend, or a new commit), then push again. The name is not shown.", file=out)
         return 1 if hits else 0
-    except WorkkitError as exc:
-        print(f"wk: {exc}", file=sys.stderr)
+    except KitError as exc:
+        print(f"nh: {exc}", file=sys.stderr)
         return 2
 
 
@@ -648,8 +649,8 @@ def main(argv: list[str] | None = None) -> int:
         if c not in ("setup", "update"):
             updated = upkeep.auto_update(where, s)
             if updated:
-                print(f"wk: work-kit updated itself from {updated['from']} to {updated['to']}" if "to" in updated
-                      else f"wk: could not update work-kit ({updated['error']}); trying again {updated['retry']}",
+                print(f"nh: nearly-headless updated itself from {updated['from']} to {updated['to']}" if "to" in updated
+                      else f"nh: could not update nearly-headless ({updated['error']}); trying again {updated['retry']}",
                       file=sys.stderr)
         if c == "serve":
             from . import dashboard
@@ -665,7 +666,7 @@ def main(argv: list[str] | None = None) -> int:
         if c == "health":
             from . import health
             if args.days < 1:
-                raise WorkkitError("--days must be 1 or more")
+                raise KitError("--days must be 1 or more")
             h = health.health(days=args.days)
             print(json.dumps(h, indent=2) if args.json else health.text(h))
             return 0
@@ -692,7 +693,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
             from . import check
             if any(check.NOT_PUSHED in line for line in changed):
-                print(f"wk: {check.NOT_PUSHED}. Fix the push, then push the repo's base branch.", file=sys.stderr)
+                print(f"nh: {check.NOT_PUSHED}. Fix the push, then push the repo's base branch.", file=sys.stderr)
                 return 3
             return 1 if found else 0
         if c == "check":
@@ -712,20 +713,20 @@ def main(argv: list[str] | None = None) -> int:
             data, text = result
             print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
             if isinstance(data, dict) and str(data.get("push", "")).startswith("push failed"):
-                print("wk: RECORDED BUT NOT ON GITHUB. Fix the push, then push the repo's base branch.", file=sys.stderr)
+                print("nh: RECORDED BUT NOT ON GITHUB. Fix the push, then push the repo's base branch.", file=sys.stderr)
                 return 3
             return 0
         print(json.dumps(result, indent=2, ensure_ascii=False))
         if str(result.get("push", "")).startswith("push failed"):
-            print("wk: RECORDED BUT NOT ON GITHUB. Fix the push, then push the repo's base branch.", file=sys.stderr)
+            print("nh: RECORDED BUT NOT ON GITHUB. Fix the push, then push the repo's base branch.", file=sys.stderr)
             return 3
         return 0
     except turns.Refused as exc:
-        print(f"wk: {exc}", file=sys.stderr)
+        print(f"nh: {exc}", file=sys.stderr)
         return 1
-    except WorkkitError as exc:
-        print(f"wk: {exc}", file=sys.stderr)
+    except KitError as exc:
+        print(f"nh: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:  # a file another program holds, a full disk, a missing folder: say so, no traceback
-        print(f"wk: could not read or write a file: {exc}", file=sys.stderr)
+        print(f"nh: could not read or write a file: {exc}", file=sys.stderr)
         return 2

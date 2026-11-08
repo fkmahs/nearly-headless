@@ -15,7 +15,7 @@ from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
+os.environ["NH_AUTO_UPDATE"] = "0"  # tests never reach GitHub; the daily check has its own test
 
 from wk import __version__, cli, core, dashboard, guard, keepout, reply, settings, upkeep, work  # noqa: E402
 
@@ -48,13 +48,13 @@ def sh(cwd, *args):
 
 
 class DockerCheck(unittest.TestCase):
-    """wk doctor's Docker line: off Linux, builders' tests need it, so missing or stopped is a failure with the fix."""
+    """nh doctor's Docker line: off Linux, builders' tests need it, so missing or stopped is a failure with the fix."""
     def check(self, installed=True, running=True, platform="win32"):
         info = lambda argv, timeout=0: subprocess.CompletedProcess(argv, 0 if running else 1, "", "")  # noqa: E731
         return upkeep.docker_check(platform, lambda name: "docker" if installed else None, info)
 
     def test_docker_line(self):
-        self.assertEqual(self.check(), [{"ok": True, "check": "Docker running: wk test runs in Linux"}])
+        self.assertEqual(self.check(), [{"ok": True, "check": "Docker running: nh test runs in Linux"}])
         stopped, = self.check(running=False)
         self.assertFalse(stopped["ok"])
         self.assertIn("fix: start Docker Desktop, and turn on its 'Start Docker Desktop when you sign in'",
@@ -96,7 +96,7 @@ class Upkeep(unittest.TestCase):
         self.codex, self.agents = self.tmp / "codex", self.tmp / "agents"  # stand in for ~/.codex and ~/.agents
         self._real = dashboard._gh, upkeep.claude_dir, upkeep.codex_dir, upkeep.agents_dir, upkeep.beside
         upkeep.claude_dir, upkeep.codex_dir = (lambda: self.claude), (lambda: self.codex)
-        upkeep.beside = lambda: self.tmp / "wwid"  # never the laptop's own profile repo beside work-kit
+        upkeep.beside = lambda: self.tmp / "wwid"  # never the laptop's own profile repo beside nearly-headless
         upkeep.agents_dir = lambda: self.agents
         dashboard._gh = lambda cwd, *a: json.dumps([{"number": 7, "title": "Aged debt view", "isDraft": True,
                                                       "headRefName": "aged-debt", "url": "https://x/7",
@@ -125,7 +125,7 @@ class Upkeep(unittest.TestCase):
         self.assertTrue(core.same_path(settings.repo(s, "app"), self.app))
         self.assertFalse(upkeep.setup(self.settings, "Someone Else")["created"])  # never overwritten
         self.assertEqual(settings.load(self.settings)["owner"], "Pat Lee")
-        with self.assertRaises(core.WorkkitError):
+        with self.assertRaises(core.KitError):
             upkeep.setup(self.tmp / "other.toml")  # a new laptop must name its owner
 
     def test_setup_keeps_spreadsheets_out_of_every_repo_and_its_worktrees_and_keeps_the_owners_lines(self):
@@ -153,6 +153,10 @@ class Upkeep(unittest.TestCase):
         exclude.write_text(text.replace("*.zip\n", "") + "mine-too/\n", encoding="utf-8")  # an older release's block
         upkeep.setup(self.settings, skills=self.skills)
         self.assertEqual(exclude.read_text(encoding="utf-8"), text + "mine-too/\n")  # refreshed in place, once
+        old = text.replace(keepout.START, "# work-kit: files that never go to GitHub. wk setup keeps this block.")
+        exclude.write_text(old.replace(keepout.END, "# end of work-kit's block"), encoding="utf-8")
+        upkeep.setup(self.settings, skills=self.skills)  # the block as releases before 1.56.0 wrote it
+        self.assertEqual(exclude.read_text(encoding="utf-8"), text)  # replaced, never doubled
         self.assertTrue(doctor_ok())
         self.assertEqual(status(self.app), "")  # nothing committed or changed in the repo itself
         # an invoice statement still commits the way the invoicing toolkit does it (git add -- . in billing/): the
@@ -171,10 +175,10 @@ class Upkeep(unittest.TestCase):
         self.settings.write_text(f'owner = "Pat Lee"\n\n[repos.app]\npath = "{core.posix(self.app)}"\n',
                                  encoding="utf-8")
         exclude = self.app / ".git" / "info" / "exclude"
-        exclude.write_text("# work-kit: a start line with no end\nmine/\n", encoding="utf-8")
+        exclude.write_text("# nearly-headless: a start line with no end\nmine/\n", encoding="utf-8")
         upkeep.setup(self.settings, skills=self.skills)
         first = exclude.read_text(encoding="utf-8")
-        self.assertTrue(first.startswith("# work-kit: a start line with no end\nmine/\n\n" + keepout.START))
+        self.assertTrue(first.startswith("# nearly-headless: a start line with no end\nmine/\n\n" + keepout.START))
         upkeep.setup(self.settings, skills=self.skills)
         self.assertEqual(exclude.read_text(encoding="utf-8"), first)  # the next run finds its own block
         exclude.write_bytes(b"caf\xe9/\n")  # not UTF-8: left exactly as it is, and said so
@@ -189,7 +193,7 @@ class Upkeep(unittest.TestCase):
         self.assertNotIn("Codex", result["expectations"])  # Codex is not on this test laptop
         mine = (self.claude / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertTrue(mine.startswith(upkeep.MARK))
-        self.assertTrue(mine.startswith("<!-- work-kit: the owner's expectations"))  # the work-kit mark, not WWID's
+        self.assertTrue(mine.startswith("<!-- nearly-headless: the owner's expectations"))  # the nearly-headless mark, not WWID's
         self.assertIn((KIT / "AGENTS.md").read_text(encoding="utf-8"), mine)
         self.assertIn("\n# Compact instructions\n", mine)  # what Claude keeps when it compacts a chat
         for keep in ("open piece", "waiting on the owner", "agent id", "this turn", "Drop finished work"):
@@ -205,6 +209,50 @@ class Upkeep(unittest.TestCase):
         with (self.claude / "CLAUDE.md").open("a", encoding="utf-8") as f:
             f.write(f"@{core.posix(KIT / 'AGENTS.md')}\n")
         self.assertTrue(all(c["ok"] for c in upkeep.expectations_check()))
+
+    def test_expectations_an_older_release_wrote_are_replaced_not_doubled(self):
+        self.claude.mkdir(parents=True)
+        (self.claude / "CLAUDE.md").write_text("<!-- work-kit: the owner's expectations for every chat. -->\n\nOld rules\n",
+                                               encoding="utf-8")
+        self.assertTrue(upkeep.install_expectations()["Claude"]["installed"])
+        mine = (self.claude / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertEqual(mine, upkeep._expectations())
+        self.assertNotIn("Old rules", mine)
+        self.assertNotIn("work-kit:", mine)
+
+    def test_setup_moves_the_old_settings_folder_once_and_doctor_wants_one(self):
+        home = self.tmp / "home"
+        (home / ".workkit").mkdir(parents=True)
+        (home / ".workkit" / "settings.toml").write_text('owner = "Pat Lee"\n', encoding="utf-8")
+        (home / ".workkit" / "reply-check.log").write_text("x\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k not in ("NH_SETTINGS", "WORKKIT_SETTINGS")}
+        with mock.patch.object(Path, "home", lambda: home), mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(settings.path(), home / ".workkit" / "settings.toml")  # read where it is until setup
+            done = upkeep.setup(settings.path(), skills=self.skills)
+            self.assertTrue(done["settings_moved"]["moved"])
+            self.assertFalse((home / ".workkit").exists())
+            self.assertEqual(sorted(p.name for p in (home / ".nearly-headless").iterdir()),
+                             ["reply-check.log", "settings.toml"])  # the whole folder
+            self.assertEqual(settings.path(), home / ".nearly-headless" / "settings.toml")
+            self.assertEqual(done["settings"], core.posix(home / ".nearly-headless" / "settings.toml"))
+            self.assertIn("kit = ", (home / ".nearly-headless" / "settings.toml").read_text(encoding="utf-8"))
+            self.assertEqual(upkeep.home_check(), [])
+            (home / ".workkit").mkdir()  # two live copies: nothing moves, doctor says which to keep
+            self.assertFalse(upkeep.setup(settings.path(), skills=self.skills)["settings_moved"]["moved"])
+            bad, = upkeep.home_check()
+            self.assertFalse(bad["ok"])
+            self.assertIn(f"keep {core.posix(home / '.nearly-headless')}", bad["check"])
+            with mock.patch.dict(os.environ, {"WORKKIT_SETTINGS": str(self.settings)}):
+                self.assertEqual(settings.path(), self.settings.resolve())  # the older variable still names it
+
+    def test_doctor_checks_path_has_the_kits_launcher_and_gives_the_command(self):
+        ok, = upkeep.path_check({"PATH": str(KIT / "bin")})
+        self.assertTrue(ok["ok"])
+        bad, = upkeep.path_check({"PATH": "/usr/bin"}, "win32")
+        self.assertFalse(bad["ok"])
+        self.assertIn("[Environment]::SetEnvironmentVariable('Path', '", bad["check"])
+        self.assertIn("bin;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')", bad["check"])
+        self.assertIn("export PATH=", upkeep.path_check({"PATH": "/usr/bin"}, "linux")[0]["check"])
 
     def test_codex_gets_the_same_expectations_and_skills_when_installed(self):
         self.codex.mkdir()
@@ -236,14 +284,14 @@ class Upkeep(unittest.TestCase):
         self.assertFalse((self.agents / "skills" / "supervisor" / "dropped.md").exists())
         self.assertTrue(all(c["ok"] for c in upkeep.kit_checks()))
 
-    def test_work_kit_updates_itself_once_a_day(self):
+    def test_the_kit_updates_itself_once_a_day(self):
         upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         s = settings.load(self.settings)
         calls, real = [], (upkeep.latest_version, upkeep.update, upkeep.fetched)
         upkeep.latest_version = lambda fetch=False, kit=None: calls.append("check") or "9.9.9"
         upkeep.update = lambda where, kit=None: calls.append("update") or {"from": "1.4.0", "to": "9.9.9"}
         upkeep.fetched = lambda kit=None: ""
-        os.environ.pop("WORKKIT_AUTO_UPDATE")
+        os.environ.pop("NH_AUTO_UPDATE")
         try:
             self.assertEqual(upkeep.auto_update(self.settings, s, "2026-10-28")["to"], "9.9.9")
             self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-10-28"))  # once a day
@@ -252,21 +300,21 @@ class Upkeep(unittest.TestCase):
             self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-10-29"))  # already current
             self.assertIsNone(upkeep.auto_update(self.settings, s | {"auto_update": False}, "2026-10-30"))
             self.assertEqual(calls, ["check", "update", "check"])
-            upkeep.latest_version = lambda fetch=False, kit=None: (_ for _ in ()).throw(core.WorkkitError("offline"))
+            upkeep.latest_version = lambda fetch=False, kit=None: (_ for _ in ()).throw(core.KitError("offline"))
             self.assertEqual(upkeep.auto_update(self.settings, s, "2026-10-31"),
                              {"error": "offline", "retry": "on the next command"})
         finally:
-            os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+            os.environ["NH_AUTO_UPDATE"] = "0"
             upkeep.latest_version, upkeep.update, upkeep.fetched = real
 
     def test_the_daily_check_stamps_the_day_only_once_github_answered(self):
         upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
-        s, stamp = settings.load(self.settings), self.settings.parent / ".work-kit-checked"
+        s, stamp = settings.load(self.settings), self.settings.parent / ".nearly-headless-checked"
         real, answers = (upkeep.fetched, upkeep.latest_version, upkeep.update), ["git fetch failed: offline", ""]
         upkeep.fetched = lambda kit=None: answers.pop(0)
         upkeep.latest_version = lambda fetch=False, kit=None: "99.0.0"
-        upkeep.update = lambda where, kit=None: (_ for _ in ()).throw(core.WorkkitError("main checkout has edits"))
-        os.environ.pop("WORKKIT_AUTO_UPDATE")
+        upkeep.update = lambda where, kit=None: (_ for _ in ()).throw(core.KitError("main checkout has edits"))
+        os.environ.pop("NH_AUTO_UPDATE")
         try:
             self.assertEqual(upkeep.auto_update(self.settings, s, "2026-11-08"),
                              {"error": "git fetch failed: offline", "retry": "on the next command"})
@@ -276,7 +324,7 @@ class Upkeep(unittest.TestCase):
             self.assertEqual(stamp.read_text(encoding="utf-8"), "2026-11-08")  # checked: once a day from here
             self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-11-08"))
         finally:
-            os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+            os.environ["NH_AUTO_UPDATE"] = "0"
             upkeep.fetched, upkeep.latest_version, upkeep.update = real
 
     def test_update_moves_the_laptops_kit_not_a_builders_worktree(self):
@@ -301,12 +349,13 @@ class Upkeep(unittest.TestCase):
         work.ask(r, "reports", "Ship before month end?", options="A (recommended): ship; undo: revert | B: wait",
                  recommended="yes", piece="P1")
         work.inbox_add(r, "reports", "Client asks about totals", "https://mail.example.org/m/1", "Mail")
-        self.assertTrue(all(f["ok"] for f in upkeep.doctor(s, self.settings) if "gh" not in f["check"]))
+        with mock.patch.dict(os.environ, {"PATH": str(KIT / "bin") + os.pathsep + os.environ.get("PATH", "")}):
+            self.assertTrue(all(f["ok"] for f in upkeep.doctor(s, self.settings) if "gh" not in f["check"]))
         view = dashboard.overview(s)
         self.assertIn("app reports: Ship before month end? (recommended: yes)", view["attention"])
         page = dashboard.render(view)
         for text in ("Waiting on you", "Your work", "Loose ends on this laptop", "Repos and pull requests",
-                     "Check GitHub now", 'id="veil"', "How work-kit runs your work", "active</span>", "data-fixes",
+                     "Check GitHub now", 'id="veil"', "How nearly-headless runs your work", "active</span>", "data-fixes",
                      "Building · waiting on you", "waiting ${n} days", "Whole repo", "nothing to fix</button>"):
             self.assertIn(text, page)
         for gone in ('id="v-waiting"', 'id="v-hours"', "Hours not yet billed", "finished this week"):
@@ -322,10 +371,10 @@ class Upkeep(unittest.TestCase):
         self.assertIn('in its inbox, unread', page)
         self.assertIn("listNode(l, true)", page)  # every supervisor opens expanded, its pieces in a table
         product = data["repos"][0]["products"][0]
-        self.assertEqual([f["line"] for f in product["fixes"]], product["problems"])  # wk check's findings, in parts
+        self.assertEqual([f["line"] for f in product["fixes"]], product["problems"])  # nh check's findings, in parts
         self.assertEqual(data["kinds"]["note"]["heading"], "Notes to tidy")  # the to-fix pop-up's plain words
         self.assertEqual(data["kinds"]["memory"]["who"], "nobody")  # the page shows these as notes, never "to fix"
-        self.assertNotIn("The fix:", page)  # and no commands in it: those stay in wk check for the supervisor
+        self.assertNotIn("The fix:", page)  # and no commands in it: those stay in nh check for the supervisor
         self.assertIn("unbilled", data["repos"][0])
         self.assertIn("+a.rank", page)  # in the supervisor's recorded order
         self.assertNotIn("Finished this week", page)
@@ -376,7 +425,7 @@ class Upkeep(unittest.TestCase):
         self.assertRegex(piece["latest"], "Owner chose the monthly layout$")
         self.assertTrue(piece["note"].endswith("reports/notes/P1.md"))
         self.assertIn("Owner chose the monthly layout", piece["note_text"])  # the pop-up shows the whole note
-        self.assertEqual(len(data["system"]["hooks"]), len(upkeep.HOOKS))  # the work-kit page's parts (wk/system.py)
+        self.assertEqual(len(data["system"]["hooks"]), len(upkeep.HOOKS))  # the nearly-headless page's parts (wk/system.py)
         self.assertTrue(data["system"]["roles"] and data["system"]["settings"])
         self.assertTrue(page_data(dashboard.render(dashboard.overview(s), saved=True))["saved"])
         work.set_product(r, "reports", "")
@@ -425,7 +474,7 @@ class Upkeep(unittest.TestCase):
         from wk import usage
         upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         real = dashboard.overview, usage.Records.at, usage.app_sessions
-        records = usage.Records(self.tmp / "cache.json")  # never the real ~/.workkit
+        records = usage.Records(self.tmp / "cache.json")  # never the real ~/.nearly-headless
         usage.Records.at, usage.app_sessions = (lambda cache=None: records), (lambda: [])
         dashboard.overview = lambda s, fetch=False: {"at": "now", "repos": [], "alerts": [], "attention": [],
                                                      "fetched": fetch}
@@ -502,9 +551,9 @@ class Upkeep(unittest.TestCase):
         port = old.server_address[1]
         try:
             self.assertEqual(dashboard.running(port), {"version": "1.0.0"})
-            with self.assertRaises(core.WorkkitError) as caught:
+            with self.assertRaises(core.KitError) as caught:
                 dashboard.serve(s, port)
-            self.assertIn("on the older work-kit 1.0.0", str(caught.exception))
+            self.assertIn("on the older nearly-headless 1.0.0", str(caught.exception))
             self.assertIn("Ctrl+C", str(caught.exception))
             with self.assertRaises(OSError):  # a second server cannot quietly take the same address
                 dashboard.Server(("127.0.0.1", port), old.RequestHandlerClass)
@@ -513,7 +562,7 @@ class Upkeep(unittest.TestCase):
             old.server_close()
         same = stand_in(json.dumps({"kit": {"version": __version__}}).encode())
         try:
-            with self.assertRaises(core.WorkkitError) as caught:
+            with self.assertRaises(core.KitError) as caught:
                 dashboard.serve(s, same.server_address[1])
             self.assertIn("already running: open http://127.0.0.1:", str(caught.exception))
         finally:
@@ -521,7 +570,7 @@ class Upkeep(unittest.TestCase):
             same.server_close()
         other = stand_in(b"<html>not a command center</html>")
         try:
-            with self.assertRaises(core.WorkkitError) as caught:
+            with self.assertRaises(core.KitError) as caught:
                 dashboard.serve(s, other.server_address[1])
             self.assertIn("Something else is using", str(caught.exception))
         finally:
@@ -545,7 +594,7 @@ class Upkeep(unittest.TestCase):
         self.assertFalse(any("on its own" in a for a in dashboard.overview(s)["alerts"]))
 
     def test_serve_moves_to_a_new_release_on_the_same_address_and_keeps_serving_if_that_fails(self):
-        """A real keeper and real workers, on a copy of work-kit whose version is changed the way an update would."""
+        """A real keeper and real workers, on a copy of nearly-headless whose version is changed the way an update would."""
         import socket
         import threading
         from http.server import BaseHTTPRequestHandler
@@ -612,7 +661,7 @@ class Upkeep(unittest.TestCase):
         finally:
             keeper.close()
             held.server_close()
-        self.assertIsNotNone(keeper.current.proc.poll())  # Ctrl+C on wk serve leaves no worker behind
+        self.assertIsNotNone(keeper.current.proc.poll())  # Ctrl+C on nh serve leaves no worker behind
 
     def test_setup_clones_a_missing_repo_and_records_its_client(self):
         source = self.tmp / "source.git"
@@ -623,9 +672,9 @@ class Upkeep(unittest.TestCase):
         self.assertTrue((target / ".git").exists())
         self.assertEqual(s["owner"], 'Pat "PL" Lee')
         self.assertEqual(s["repos"]["acme"]["client"], "Acme \\ Co")
-        with self.assertRaises(core.WorkkitError):
+        with self.assertRaises(core.KitError):
             upkeep.setup(self.tmp / "other.toml", "Pat", [f"x={self.tmp / 'missing'}"])  # no folder and no url
-        with self.assertRaises(core.WorkkitError):
+        with self.assertRaises(core.KitError):
             upkeep.setup(self.tmp / "other2.toml", "Pat", [f"x={self.app},colour=blue"])  # unknown option
 
     def test_the_wwid_profile_is_optional_and_setup_adds_it_once_when_found(self):
@@ -643,7 +692,7 @@ class Upkeep(unittest.TestCase):
 
         before = self.settings.read_text(encoding="utf-8") + '\n[reply]\nrequire = ["Since you wrote:"]\n'
         self.settings.write_text(before, encoding="utf-8")
-        beside = self.tmp / "wwid"  # a profile repo beside work-kit, as on a laptop that has one
+        beside = self.tmp / "wwid"  # a profile repo beside nearly-headless, as on a laptop that has one
         beside.mkdir()
         sh(beside, "init", "-b", "main")
         (beside / "verdicts.md").write_text("# WWID verdicts\n", encoding="utf-8")
@@ -666,7 +715,7 @@ class Upkeep(unittest.TestCase):
         mine.mkdir()
         upkeep.setup(other, "Pat Lee", [], self.skills, profile=str(mine))
         self.assertTrue(core.same_path(settings.profile(settings.load(other)), mine))
-        with self.assertRaises(core.WorkkitError):
+        with self.assertRaises(core.KitError):
             upkeep.setup(self.tmp / "third.toml", "Pat Lee", [], self.skills, profile=str(self.tmp / "missing"))
         self.assertFalse((self.tmp / "third.toml").exists())  # refused before anything is written
 
@@ -743,7 +792,7 @@ class Upkeep(unittest.TestCase):
         for broken in ('owner = "Pat\n[repos.app\n', 'owner = "Pat"\nrepos = "app"\n',
                        'repos = {app = {path = "C:/a"}}\n'):  # unreadable, odd shape, and one an addition would break
             self.settings.write_text(broken, encoding="utf-8")
-            with self.assertRaises(core.WorkkitError):
+            with self.assertRaises(core.KitError):
                 upkeep.setup(self.settings, "", [f"new={self.app}"], self.skills)
             self.assertEqual(self.settings.read_text(encoding="utf-8"), broken)
 
@@ -753,7 +802,7 @@ class Upkeep(unittest.TestCase):
         clones, real = [], upkeep._clone
         upkeep._clone = lambda url, path: clones.append((url, path))
         try:
-            with self.assertRaises(core.WorkkitError):
+            with self.assertRaises(core.KitError):
                 upkeep.setup(self.settings, "", [f"new={self.tmp / 'new'},url=git@x:me/new.git"], self.skills)
         finally:
             upkeep._clone = real
@@ -764,9 +813,9 @@ class Upkeep(unittest.TestCase):
         self.settings.write_text('owner = "Pat"\n\n[repos.app]\npath = "C:/a"\n', encoding="utf-8")
         before = self.settings.read_text(encoding="utf-8")
         for bad in ("app.b", "my repo", "a]b", ""):
-            with self.assertRaises(core.WorkkitError):
+            with self.assertRaises(core.KitError):
                 upkeep.setup(self.settings, "", [f"{bad}={self.app}"], self.skills)
-            with self.assertRaises(core.WorkkitError):
+            with self.assertRaises(core.KitError):
                 upkeep.setup(self.tmp / "fresh.toml", "Pat", [f"{bad}={self.app}"], self.skills)
         self.assertEqual(self.settings.read_text(encoding="utf-8"), before)
         self.assertFalse((self.tmp / "fresh.toml").exists())
@@ -776,14 +825,14 @@ class Upkeep(unittest.TestCase):
     def test_the_daily_update_survives_any_failure(self):
         upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         s, real = settings.load(self.settings), (upkeep.latest_version, upkeep.fetched)
-        os.environ.pop("WORKKIT_AUTO_UPDATE")
+        os.environ.pop("NH_AUTO_UPDATE")
         upkeep.fetched = lambda kit=None: ""
         upkeep.latest_version = lambda fetch=False, kit=None: (_ for _ in ()).throw(ValueError("odd output"))
         try:
             self.assertEqual(upkeep.auto_update(self.settings, s, "2026-11-02"),
                              {"error": "odd output", "retry": "on the next command"})
         finally:
-            os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+            os.environ["NH_AUTO_UPDATE"] = "0"
             upkeep.latest_version, upkeep.fetched = real
 
     def test_page_data_can_never_break_out_of_the_script(self):
@@ -846,9 +895,11 @@ class Upkeep(unittest.TestCase):
         path.parent.mkdir(parents=True)
         mine = {"type": "command", "command": "echo hello"}
         old = {"type": "command", "command": '"D:/old place/work-kit/bin/wk" recall', "timeout": 30}
+        bare = {"type": "command", "command": "wk recall"}  # a hook that reached the kit through PATH
         path.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "hooks": {
             "Stop": [{"hooks": [mine]}], "UserPromptSubmit": [{"hooks": [mine]}],
-            "SessionStart": [{"matcher": "startup", "hooks": [mine]}, {"matcher": "compact", "hooks": [old]}]}}),
+            "SessionStart": [{"matcher": "startup", "hooks": [mine]}, {"matcher": "compact", "hooks": [old]},
+            {"matcher": "resume", "hooks": [bare]}]}}),
             encoding="utf-8")
         self.assertFalse(all(c["ok"] for c in upkeep.hook_check()))
         result = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
@@ -863,7 +914,7 @@ class Upkeep(unittest.TestCase):
         self.assertEqual(after["hooks"]["UserPromptSubmit"], [  # the owner's kept, the reminder beside it
             {"hooks": [mine]}, {"hooks": [{"type": "command", "command": upkeep.hook_command(upkeep.REMIND),
                                            "timeout": 30}]}])
-        self.assertTrue(upkeep.hook_command(upkeep.REMIND).endswith('/bin/wk" reply-check --remind'))
+        self.assertTrue(upkeep.hook_command(upkeep.REMIND).endswith('/bin/nh" reply-check --remind'))
         recall = {"type": "command", "command": upkeep.hook_command(), "timeout": 30}
         self.assertEqual(result["clear_hook"]["changed"], True)
         self.assertEqual((result["start_hook"]["changed"], result["resume_hook"]["changed"]), (True, True))
@@ -871,19 +922,20 @@ class Upkeep(unittest.TestCase):
             {"matcher": "startup", "hooks": [mine]},       # and a cleared, started or resumed chat gets its list too
             {"matcher": "compact", "hooks": [recall]}, {"matcher": "clear", "hooks": [recall]},
             {"matcher": "startup", "hooks": [recall]}, {"matcher": "resume", "hooks": [recall]}])
-        self.assertTrue(upkeep.hook_command().endswith('/bin/wk" recall'))
+        self.assertTrue(upkeep.hook_command().endswith('/bin/nh" recall'))
+        self.assertTrue(upkeep.hook_command().startswith(f'"{core.posix(upkeep.KIT)}/bin/nh"'))  # by path, not PATH
         self.assertTrue(all(c["ok"] for c in upkeep.hook_check()))
         text = path.read_text(encoding="utf-8")
         self.assertEqual(upkeep.install_hook(), {"installed": True, "changed": False, "file": core.posix(path)})
         self.assertEqual(upkeep.install_hook(upkeep.RECALL_CLEAR)["changed"], False)
         self.assertEqual([upkeep.install_hook(x)["changed"] for x in (upkeep.RECALL_START, upkeep.RECALL_RESUME)],
                          [False, False])
-        self.assertIn("Claude: supervisors get their list when a chat starts (wk recall hook)",
+        self.assertIn("Claude: supervisors get their list when a chat starts (nh recall hook)",
                       [c["check"] for c in upkeep.hook_check()])
         upkeep.setup(self.settings, "Pat Lee", [], self.skills)
         self.assertEqual(path.read_text(encoding="utf-8"), text)  # a second run changes nothing
 
-    def test_hooks_installed_from_this_work_kit_count_when_wk_runs_from_one_of_its_worktrees(self):
+    def test_hooks_installed_from_this_kit_count_when_nh_runs_from_one_of_its_worktrees(self):
         kit, other = self.tmp / "kit", self.tmp / "other-kit"
         for folder in (kit, other):
             folder.mkdir()
@@ -907,7 +959,7 @@ class Upkeep(unittest.TestCase):
             upkeep.KIT = self.tmp / "kit-builder"  # a builder's copy of wk, as its own command center runs it
             hooks_in(kit)
             self.assertEqual([c["ok"] for c in upkeep.hook_check()], [True] * 6)
-            hooks_in(other)  # hooks of another work-kit folder are still missing ones
+            hooks_in(other)  # hooks of another nearly-headless folder are still missing ones
             self.assertEqual([c["ok"] for c in upkeep.hook_check()], [False] * 6)
         finally:
             upkeep.KIT = real
@@ -956,7 +1008,7 @@ class Upkeep(unittest.TestCase):
         path = self.claude / "settings.json"
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "model": "opus"}), encoding="utf-8")
-        self.assertFalse(upkeep.window_check()[0]["ok"])  # unset: doctor asks for wk setup
+        self.assertFalse(upkeep.window_check()[0]["ok"])  # unset: doctor asks for nh setup
         result = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         self.assertEqual(result["compact_window"],
                          {"window": upkeep.WINDOW_DEFAULT, "changed": True, "file": core.posix(path)})
@@ -998,7 +1050,7 @@ class Upkeep(unittest.TestCase):
         def gh(cwd, *args):
             calls.append(args[:2])
             if fail:
-                raise core.WorkkitError("gh: not found")
+                raise core.KitError("gh: not found")
             if args[:2] == ("run", "list"):
                 return json.dumps(runs)
             if args[:2] == ("run", "view"):
@@ -1024,7 +1076,7 @@ class Upkeep(unittest.TestCase):
         self.assertEqual(dashboard.ci_state(self.app, "main")["state"], "stopped")
         self.assertEqual(len(calls), 3)  # the second look comes from memory
         dashboard.ci_state(self.app, "main", fetch=True)
-        self.assertEqual(len(calls), 3)  # wk check read the runs a moment ago in the same Check GitHub now
+        self.assertEqual(len(calls), 3)  # nh check read the runs a moment ago in the same Check GitHub now
         runs_seen = dashboard.check._runs
         runs_seen.update({k: (v[0] - dashboard.check.FRESH - 1, v[1]) for k, v in runs_seen.items()})
         dashboard.ci_state(self.app, "main", fetch=True)
@@ -1093,7 +1145,7 @@ class Upkeep(unittest.TestCase):
                 self.assertEqual(cli.main(["--settings", str(Path(tempfile.mkdtemp()) / "s.toml"), "doctor"]), 2)
         finally:
             upkeep.doctor = real
-        self.assertIn("wk: could not read or write a file: [Errno 13] Access is denied: 'x.toml'", err.getvalue())
+        self.assertIn("nh: could not read or write a file: [Errno 13] Access is denied: 'x.toml'", err.getvalue())
         self.assertNotIn("Traceback", err.getvalue())
 
     def test_a_save_waits_for_a_file_another_program_holds(self):
@@ -1147,7 +1199,7 @@ class Upkeep(unittest.TestCase):
         def run(*argv, stdin=""):
             return subprocess.run([sys.executable, "-P", "-m", "wk", "--settings", str(settings_file), *argv],
                                   input=stdin, capture_output=True, text=True, cwd=copy,
-                                  env=os.environ | {"PYTHONPATH": str(copy), "WORKKIT_AUTO_UPDATE": "0"})
+                                  env=os.environ | {"PYTHONPATH": str(copy), "NH_AUTO_UPDATE": "0"})
         for argv in (["version"], ["--version"]):
             done = run(*argv)
             self.assertEqual((done.returncode, done.stdout.strip()), (0, __version__), done.stderr)

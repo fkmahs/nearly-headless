@@ -1,6 +1,6 @@
 # NetSuite toolkit
 
-Optional. For repos that work on a NetSuite account. Each repo keeps its own NetSuite credentials in its git-ignored `.env`; nothing about an account lives in work-kit. A repo uses this toolkit when its AGENTS.md says so.
+Optional. For repos that work on a NetSuite account. Each repo keeps its own NetSuite credentials in its git-ignored `.env`; nothing about an account lives in nearly-headless. A repo uses this toolkit when its AGENTS.md says so.
 
 | | |
 |---|---|
@@ -42,7 +42,7 @@ A repo whose `.env` already uses other names passes `--prefix`, e.g. `--prefix A
 Check it (shows which keys are set, never their values, and runs one tiny query):
 
 ```
-py <work-kit>/toolkits/netsuite/query.py --env sb --check
+py <nearly-headless>/toolkits/netsuite/query.py --env sb --check
 ```
 
 ## Opt in
@@ -51,15 +51,15 @@ Add to the repo's AGENTS.md:
 
 ```
 ## NetSuite
-Query NetSuite with work-kit's toolkit, from this repo's folder:
-`py <work-kit>/toolkits/netsuite/query.py --env sb|prod "<SuiteQL>" --out <file>.csv|.json`
+Query NetSuite with the kit's toolkit, from this repo's folder:
+`py <nearly-headless>/toolkits/netsuite/query.py --env sb|prod "<SuiteQL>" --out <file>.csv|.json`
 Credentials: NETSUITE_<ENV>_* in this repo's .env. Read-only; never print the values.
 ```
 
 ## Querying
 
 ```
-py <work-kit>/toolkits/netsuite/query.py --env prod --file q.sql --out out/result.csv
+py <nearly-headless>/toolkits/netsuite/query.py --env prod --file q.sql --out out/result.csv
 ```
 
 - Run it from the repo's folder; it reads that repo's `.env`.
@@ -74,7 +74,7 @@ py <work-kit>/toolkits/netsuite/query.py --env prod --file q.sql --out out/resul
 One deploy tool for every NetSuite SDF repo. The repo keeps a thin `tools/sdf.py` that loads this kit by path and calls `main(argv, root=<repo>)`, plus an `sdf.toml` at its root. Everything account-specific lives in `sdf.toml`; the kit holds no account names or IDs.
 
 ```toml
-requires = "1.39.0"                  # oldest work-kit this repo needs; older refuses until `wk update`
+requires = "1.39.0"                  # oldest nearly-headless this repo needs; older refuses until `nh update`
 own_folder = "/SuiteScripts/ACME/"   # File Cabinet folder `upload` may write without the replace flag
 wrapper_env = "ACME_SDF_WRAPPER"     # set to 1 on every suitecloud call (suitecloud.config.js checks it)
 reference = "reference/vendor"       # where `--reference` imports go (never deployed)
@@ -100,10 +100,10 @@ ignore = []                          # object fields that never count as a diffe
 
 What it keeps for every repo:
 - `sb` or `prod` is always explicit, and the auth ID's account must match `.env`.
-- Production deploys and uploads run only released code: the work-kit whose `wk` runs the gates, and the checkout holding this kit if that is another one, must have no changes in `toolkits/netsuite` or `wk` and be on work-kit's `origin/main`.
-- Deploy scope is picked by PR: a sandbox deploy sends what the branch changed since its merge-base with `origin/main`, under `wk turn` on those files; `release sb` puts main's version back and frees the turn.
-- Production runs only on `main`, level with `origin/main`, after the merge, behind `wk gate release` and `wk gate approved`; it tags `prod-<date>-pr<N>` and checks release ancestry.
-- `upload` sends files only (no objects); imports take `--reference`; a Java agent maps `|` in File Cabinet names to `-` locally (needs JDK 21, cached under `%LOCALAPPDATA%\work-kit\sdf-pathfix`).
+- Production deploys and uploads run only released code: the nearly-headless whose `nh` runs the gates, and the checkout holding this kit if that is another one, must have no changes in `toolkits/netsuite` or `wk` and be on the kit's `origin/main`.
+- Deploy scope is picked by PR: a sandbox deploy sends what the branch changed since its merge-base with `origin/main`, under `nh turn` on those files; `release sb` puts main's version back and frees the turn.
+- Production runs only on `main`, level with `origin/main`, after the merge, behind `nh gate release` and `nh gate approved`; it tags `prod-<date>-pr<N>` and checks release ancestry.
+- `upload` sends files only (no objects); imports take `--reference`; a Java agent maps `|` in File Cabinet names to `-` locally (needs JDK 21, cached under `%LOCALAPPDATA%\nearly-headless\sdf-pathfix`).
 
 **Production compare.** Before `deploy prod` and `upload prod`, and in `--dryrun`, the kit imports production's copy of every item it would send, read-only, into a temporary checkout, and compares it with git:
 
@@ -116,12 +116,12 @@ What it keeps for every repo:
 
 An item the import leaves no copy of counts as new only when `object:list` or a `file:list` that shows files confirms production doesn't have it (a file in a new folder: the nearest parent folder's listing, with nothing under the new folder); otherwise the release stops ("could not import …; nothing was compared"). Objects are compared by meaning, but a row without a script ID (a role permission, a list value, a translation) that only production has is always a difference.
 
-The approval is still `wk gate approved` on the released PR; other PRs and direct commits are covered by `Includes PR #K` / `Includes <sha>` lines on that comment. Sandbox needs no compare.
+The approval is still `nh gate approved` on the released PR; other PRs and direct commits are covered by `Includes PR #K` / `Includes <sha>` lines on that comment. Sandbox needs no compare.
 
 Opt in, in the repo's AGENTS.md:
 
 ```
-- **SDF** (import, validate, deploy): only through `py tools/sdf.py` (work-kit's NetSuite SDF kit, settings in `sdf.toml`), never raw `suitecloud` project commands.
+- **SDF** (import, validate, deploy): only through `py tools/sdf.py` (the kit's NetSuite SDF kit, settings in `sdf.toml`), never raw `suitecloud` project commands.
 ```
 
 Tests: `py -m unittest discover -s toolkits/netsuite/tests`.

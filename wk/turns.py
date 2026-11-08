@@ -14,13 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import core, settings, testmap
-from .core import WorkkitError
+from .core import KitError
 
 STATE, LOCK = "wk-turns.json", "wk-turns.lock"
 HOURS = 2.0
 
 
-class Refused(WorkkitError):
+class Refused(KitError):
     pass
 
 
@@ -76,7 +76,7 @@ def _fetched(top: Path, base: str) -> str:
 
 def _hours(hours: float) -> float:
     if not 0 < hours <= 24:
-        raise WorkkitError("--hours must be more than 0 and at most 24")
+        raise KitError("--hours must be more than 0 and at most 24")
     return hours
 
 
@@ -168,7 +168,7 @@ def check(cwd: Path, resource: str, items: list[str]) -> dict:
     missing = [i for i in items if i not in held]
     if missing:
         raise Refused(f"{branch} does not hold a turn on {resource} for: {', '.join(missing)}. "
-                      f"Take it first: wk turn take {resource} {' '.join(missing)}")
+                      f"Take it first: nh turn take {resource} {' '.join(missing)}")
     return {"ok": True, "resource": resource, "items": items, "holder": branch}
 
 
@@ -212,9 +212,9 @@ def _gh(cwd: Path, *args: str) -> str:
     try:
         result = core.run(["gh", *args], 60, cwd=str(cwd))
     except OSError as exc:
-        raise WorkkitError(f"gh failed: {exc}") from exc
+        raise KitError(f"gh failed: {exc}") from exc
     if result.returncode:
-        raise WorkkitError("gh: " + (result.stderr.strip() or "failed"))
+        raise KitError("gh: " + (result.stderr.strip() or "failed"))
     return result.stdout
 
 
@@ -223,13 +223,14 @@ def _norm(text: str) -> str:
 
 
 def gate_approved(cwd: Path, s: dict, pr: int, action: str) -> dict:
-    """Exit 0 only when a PR comment has the line 'Approved by <approver>: <action> @ <sha>' and <sha> (7+ characters)
-    is the PR's current head commit, so an approval covers exactly the code it names. On a public repo the line reads
-    'Approved by the owner: ...', so no name is on it."""
-    name = settings.approver_at(s, cwd)
+    """Exit 0 only when a PR comment has the line 'Approved by the owner: <action> @ <sha>' and <sha> (7+ characters)
+    is the PR's current head commit, so an approval covers exactly the code it names. An approval posted before 1.56.0
+    names the approver from the settings instead, and still counts on a private repo."""
+    names = settings.approvers(s, cwd)
     data = json.loads(_gh(cwd, "pr", "view", str(pr), "--json", "comments,headRefOid,url") or "{}")
     head = (data.get("headRefOid") or "").lower()
-    line = re.compile(rf"^\s*approved by {re.escape(name)}\s*:\s*(.+?)\s*@\s*([0-9a-f]{{7,40}})\s*$", re.I | re.M)
+    who = "|".join(re.escape(n) for n in names)
+    line = re.compile(rf"^\s*approved by (?:{who})\s*:\s*(.+?)\s*@\s*([0-9a-f]{{7,40}})\s*$", re.I | re.M)
     matches = [(c, sha.lower()) for c in data.get("comments", []) for text, sha in line.findall(c.get("body", ""))
                if _norm(text) == _norm(action)]
     current = [c for c, sha in matches if head and head.startswith(sha)]
@@ -239,8 +240,9 @@ def gate_approved(cwd: Path, s: dict, pr: int, action: str) -> dict:
     if matches:
         c, sha = matches[-1]
         raise Refused(f"PR #{pr}: the approval for '{action}' ({c.get('url', '')}) names {sha}, but the PR's head is "
-                      f"now {head[:12]}. Ask {name} again for this commit.")
-    raise Refused(f"PR #{pr} has no comment with the line 'Approved by {name}: {action} @ {head[:12] or '<sha>'}'")
+                      f"now {head[:12]}. Ask the owner again for this commit.")
+    raise Refused(f"PR #{pr} has no comment with the line "
+                  f"'Approved by {settings.APPROVER}: {action} @ {head[:12] or '<sha>'}'")
 
 
 def changed_on_both(top: Path, head: str, ref: str) -> list[str]:
@@ -397,10 +399,10 @@ def builder_worktree(top: Path, branch: str) -> Path:
     rows = [r for r in core.git(top, "worktree", "list", "--porcelain").split("\n\n") if r.strip()]
     found = [i for i, r in enumerate(rows) if f"branch refs/heads/{branch}" in r.splitlines()]
     if not found:
-        raise WorkkitError(f"No worktree has {branch} checked out, so there is no builder worktree to refresh. "
+        raise KitError(f"No worktree has {branch} checked out, so there is no builder worktree to refresh. "
                            "Start a builder from the PR instead.")
     if found[0] == 0:
-        raise Refused(f"{branch} is checked out in the repo's main checkout, which wk refresh never touches.")
+        raise Refused(f"{branch} is checked out in the repo's main checkout, which nh refresh never touches.")
     return Path(rows[found[0]].splitlines()[0].removeprefix("worktree "))
 
 
@@ -429,7 +431,7 @@ def _touches(files: list[str], paths: list[str]) -> list[str]:
 
 
 def ready_gaps(comments: list, head: str = "") -> str:
-    """Why the latest `Ready @ <sha>` comment doesn't let wk refresh stand in for its builder, or "" when it does:
+    """Why the latest `Ready @ <sha>` comment doesn't let nh refresh stand in for its builder, or "" when it does:
     it must name the PR's head (a push after it has no Ready yet) and say `Gap checks: none` (the builder skill's
     Ready format), so CI is the full proof."""
     ready = [c for c in comments if isinstance(c, dict) and _READY.match(str(c.get("body") or ""))]
@@ -486,7 +488,7 @@ def refresh(cwd: Path, s: dict, pr: int, wait_minutes: float = 30.0, poll: float
     pushed = core.run(["git", "-C", str(tree), "push", "origin", f"HEAD:{branch}"], core.WRITE_TIMEOUT)
     if pushed.returncode:
         core.git(tree, "reset", "--keep", head)
-        raise WorkkitError(f"The push of {new[:12]} failed, so the merge was undone: {pushed.stderr.strip()[-300:]}")
+        raise KitError(f"The push of {new[:12]} failed, so the merge was undone: {pushed.stderr.strip()[-300:]}")
     deadline, why, seen = _now() + wait_minutes * 60, "its checks never started", None
     while True:  # a verdict counts only when two polls in a row agree, so a workflow not queued yet isn't missed
         view = json.loads(_gh(top, "pr", "view", str(pr), "--json", "headRefOid,statusCheckRollup") or "{}")

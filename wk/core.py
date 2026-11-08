@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-class WorkkitError(Exception):
+class KitError(Exception):
     pass
 
 
@@ -84,7 +84,7 @@ def git(root: Path, *args: str, check: bool = True, timeout: float = GIT_TIMEOUT
             lock = git_path(root, "index.lock")
             if lock.exists():
                 why += f". It may have left {posix(lock)}: if no git command is running there, delete it"
-        raise WorkkitError(f"git {' '.join(args[:2])}: {why}")
+        raise KitError(f"git {' '.join(args[:2])}: {why}")
     return result.stdout.strip()
 
 
@@ -111,7 +111,7 @@ def _common_dir(repo: str) -> Path:
 def checkout_of(cwd: Path) -> tuple[Path, str]:
     top = git(cwd, "rev-parse", "--show-toplevel", check=False)
     if not top:
-        raise WorkkitError(f"{cwd} is not inside a Git checkout")
+        raise KitError(f"{cwd} is not inside a Git checkout")
     branch = git(Path(top), "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
     return Path(top), branch
 
@@ -154,7 +154,7 @@ def read_json(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise WorkkitError(f"Cannot read {path}: {exc}") from exc
+        raise KitError(f"Cannot read {path}: {exc}") from exc
 
 
 def write_json(path: Path, value) -> None:
@@ -185,7 +185,7 @@ def save(repo: Path, base: str, paths: list[Path], message: str) -> str:
     """Commit exactly these paths on the repo's base branch and push them; nothing else in the checkout is touched."""
     top, branch = checkout_of(repo)
     if branch != base:
-        raise WorkkitError(f"{top} must be on {base} to record work (found '{branch or 'detached'}')")
+        raise KitError(f"{top} must be on {base} to record work (found '{branch or 'detached'}')")
     rel = sorted({posix(p.resolve().relative_to(top.resolve())) for p in paths})
     git(top, "add", "--", *rel, timeout=WRITE_TIMEOUT)
     if git(top, "status", "--porcelain", "--", *rel):
@@ -212,7 +212,7 @@ def locked(repo: Path, what: str, name: str, timeout: float = 120.0):
             except FileNotFoundError:
                 continue
             if time.time() > deadline:
-                raise WorkkitError(f"Lock is held ({lock}); retry, or remove it if stale")
+                raise KitError(f"Lock is held ({lock}); retry, or remove it if stale")
             time.sleep(0.4)
     try:
         yield

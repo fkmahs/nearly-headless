@@ -5,9 +5,9 @@ Runs one SELECT/WITH statement through the SuiteTalk REST query endpoint, signed
 HMAC-SHA256), pages through the whole result and writes it to a CSV or JSON file. Standard library only. Credentials
 come from the calling repo's git-ignored .env and are never printed. Setup and .env keys: README.md.
 
-    py <work-kit>/toolkits/netsuite/query.py --env sb "SELECT id FROM subsidiary FETCH FIRST 1 ROWS ONLY"
-    py <work-kit>/toolkits/netsuite/query.py --env prod --file q.sql --out out/result.csv
-    py <work-kit>/toolkits/netsuite/query.py --env sb --check
+    py <nearly-headless>/toolkits/netsuite/query.py --env sb "SELECT id FROM subsidiary FETCH FIRST 1 ROWS ONLY"
+    py <nearly-headless>/toolkits/netsuite/query.py --env prod --file q.sql --out out/result.csv
+    py <nearly-headless>/toolkits/netsuite/query.py --env sb --check
 """
 
 from __future__ import annotations

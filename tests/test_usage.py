@@ -1,4 +1,4 @@
-"""Claude's records read for the memory flag and the token and cost page: parsing, pricing, the flag in wk check, the
+"""Claude's records read for the memory flag and the token and cost page: parsing, pricing, the flag in nh check, the
 weekly tables, and the cache. Every transcript here is a small made-up one (no chat text)."""
 
 import json
@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ["WORKKIT_AUTO_UPDATE"] = "0"
+os.environ["NH_AUTO_UPDATE"] = "0"
 
 from wk import check, core, settings, upkeep, usage, work  # noqa: E402
 

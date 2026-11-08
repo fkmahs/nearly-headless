@@ -1,4 +1,4 @@
-"""CI cost guard: checks a repo's GitHub workflows against the work-kit template (templates/tests.yml).
+"""CI cost guard: checks a repo's GitHub workflows against the nearly-headless template (templates/tests.yml).
 
 CI minutes are a shared, capped budget. A workflow should run on PRs and pushes to the base branch only, skip
 draft PRs, cancel superseded runs, cap its runtime, and ignore `.work/` so recording work never runs CI.

@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import core, settings
-from .core import WorkkitError
+from .core import KitError
 from .turns import Refused  # exit 1: an expected no
 from .turns import ci_green, rows as turn_rows
 
@@ -57,7 +57,7 @@ def keyed_line(line: str | None):
     if not m:
         return None
     if not KEY.fullmatch(m[1].lower()):
-        raise WorkkitError(f"'{m[1]}' can't name an invoice line: use lowercase letters, digits and dashes, e.g. "
+        raise KitError(f"'{m[1]}' can't name an invoice line: use lowercase letters, digits and dashes, e.g. "
                            f"--line fixes=\"Bug fixes\". The list's usual line has no '=' after its first word.")
     return m[1].lower(), m[2]
 BILL = {"yes": "", "later": "later", "no": "no"}  # a piece's billing choice; empty means bill it with its hours
@@ -85,14 +85,14 @@ class Repo:
         try:
             return tomllib.loads(path.read_text(encoding="utf-8")).get("products", {})
         except tomllib.TOMLDecodeError as exc:
-            raise WorkkitError(f"Cannot read {path}: {exc}") from exc
+            raise KitError(f"Cannot read {path}: {exc}") from exc
 
     def product(self, name: str) -> Path:
         """A declared product's folder; an unknown one is an error listing the known ones, so typos never split work."""
         known = self.products()
         if name not in known:
-            raise WorkkitError(f"Unknown product '{name}' in {self.name}. Known: {', '.join(known) or 'none'}. "
-                               f"Declare it: wk product add {self.name} {name} --line \"...\"")
+            raise KitError(f"Unknown product '{name}' in {self.name}. Known: {', '.join(known) or 'none'}. "
+                               f"Declare it: nh product add {self.name} {name} --line \"...\"")
         return self.dir / name
 
     def write(self, what: str, edit) -> dict:
@@ -127,7 +127,7 @@ def _next_id(prefix: str, ids: list[str]) -> str:
 
 
 def _read_tsv(path: Path, columns: list[str]) -> list[dict]:
-    """Rows by the file's own header, so columns a newer work-kit added survive this version rewriting the file."""
+    """Rows by the file's own header, so columns a newer nearly-headless added survive this version rewriting the file."""
     if not path.is_file():
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -138,7 +138,7 @@ def _read_tsv(path: Path, columns: list[str]) -> list[dict]:
 
 
 def _write_tsv(path: Path, columns: list[str], rows: list[dict]) -> None:
-    """This version's columns, then any a newer work-kit added, kept as they were."""
+    """This version's columns, then any a newer nearly-headless added, kept as they were."""
     columns = columns + [k for k in dict.fromkeys(k for r in rows for k in r) if k not in columns]
     core.atomic_text(path, "\n".join(["\t".join(columns)] + ["\t".join(r.get(c, "") for c in columns)
                                                               for r in rows]) + "\n")
@@ -148,13 +148,13 @@ def _write_tsv(path: Path, columns: list[str], rows: list[dict]) -> None:
 
 def add_product(r: Repo, name: str, line: str) -> dict:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name or ""):
-        raise WorkkitError("Name a product in lowercase letters, digits and dashes, e.g. monthly-reports")
+        raise KitError("Name a product in lowercase letters, digits and dashes, e.g. monthly-reports")
     line = _clean(line)
     if not line:
-        raise WorkkitError("Give the product's invoice line (--line): what it is, in the client's words")
+        raise KitError("Give the product's invoice line (--line): what it is, in the client's words")
     if KEYED_LINE.fullmatch(line):
-        raise WorkkitError("product add takes the list's usual line, without key=. Add the list with its usual "
-                           f"line, then its named lines: wk product set {r.name} {name} --line fixes=\"...\"")
+        raise KitError("product add takes the list's usual line, without key=. Add the list with its usual "
+                           f"line, then its named lines: nh product set {r.name} {name} --line fixes=\"...\"")
 
     def edit():
         products = r.products()
@@ -173,15 +173,15 @@ def set_product(r: Repo, name: str, supervisor: str | None = None, title: str | 
     changes = {k: _clean(v) for k, v in (("supervisor", supervisor), ("title", title),
                                          (field, keyed[1] if keyed else line)) if v is not None}
     if not changes:
-        raise WorkkitError("Nothing to change: give --supervisor, --title or --line")
+        raise KitError("Nothing to change: give --supervisor, --title or --line")
     if "line" in changes and not changes["line"]:
-        raise WorkkitError("A list's invoice line can't be empty")
+        raise KitError("A list's invoice line can't be empty")
     if keyed and not changes[field]:
         held = [x for x in _read_tsv(r.dir / "hours.tsv", HOUR_COLUMNS)
                 if not x["billed"] and x["product"] == name and x["line_key"] == keyed[0]]
         if held:
-            raise WorkkitError(f"{len(held)} unbilled hours entr{'y' if len(held) == 1 else 'ies'} bill on the line "
-                               f"'{keyed[0]}'; move them first (wk hours fix ... --line-key \"\")")
+            raise KitError(f"{len(held)} unbilled hours entr{'y' if len(held) == 1 else 'ies'} bill on the line "
+                               f"'{keyed[0]}'; move them first (nh hours fix ... --line-key \"\")")
 
     def edit():
         products = r.products()
@@ -203,7 +203,7 @@ def _write_products(r: Repo, products: dict) -> Path:
 # ---------------------------------------------------------------- pieces
 
 def _write_pieces(path: Path, rows: list[dict]) -> None:
-    """Every write drops the rank of a piece that isn't open (even one closed by an older work-kit), so a reopened
+    """Every write drops the rank of a piece that isn't open (even one closed by an older nearly-headless), so a reopened
     piece never jumps the queue, and the queue place of a piece that is no longer to do: it has started."""
     for x in rows:
         if x["state"] not in OPEN:
@@ -218,18 +218,18 @@ def pieces(r: Repo, product: str) -> list[dict]:
 
 
 def _plain_name(piece: str) -> None:
-    """Refuse a name wk check would flag (check.name_problems: the one rule, so the two can't drift)."""
+    """Refuse a name nh check would flag (check.name_problems: the one rule, so the two can't drift)."""
     from . import check  # check reads work's records, so it is imported when used
     why = check.name_problems(piece)
     if why:
-        raise WorkkitError(f"A piece's name is plain words, {check.WORDS} at most, with no ticket number or file name; "
+        raise KitError(f"A piece's name is plain words, {check.WORDS} at most, with no ticket number or file name; "
                            f"this one has {' and '.join(why)}. Put the detail in its note")
 
 
 def add_piece(r: Repo, product: str, piece: str) -> dict:
     piece = _clean(piece)
     if not piece:
-        raise WorkkitError("Name the piece in a few words")
+        raise KitError("Name the piece in a few words")
     _plain_name(piece)
     path = r.product(product) / "pieces.tsv"
 
@@ -246,16 +246,16 @@ def set_piece(r: Repo, product: str, pid: str, **changes) -> dict:
     changes = {k: _clean(v) for k, v in changes.items() if v is not None}
     if "bill" in changes:
         if changes["bill"] not in BILL:
-            raise WorkkitError(f"--bill must be one of: {', '.join(BILL)}")
+            raise KitError(f"--bill must be one of: {', '.join(BILL)}")
         changes["bill"] = BILL[changes["bill"]]
         named = [x for x in _read_tsv(r.dir / "hours.tsv", HOUR_COLUMNS) if not x["billed"]
                  and x["product"] == product and pid.upper() in x["pieces"].split(",")]
         if changes["bill"] in ("no", "later") and named:
-            raise WorkkitError(f"{pid.upper()} has unbilled hours ({', '.join(x['date'] for x in named)}). Move them to "
-                               f"the right piece with wk hours fix ... --for, or remove them, before marking it "
+            raise KitError(f"{pid.upper()} has unbilled hours ({', '.join(x['date'] for x in named)}). Move them to "
+                               f"the right piece with nh hours fix ... --for, or remove them, before marking it "
                                f"{'not billing' if changes['bill'] == 'no' else 'bill later'}")
     if "piece" in changes and not changes["piece"]:
-        raise WorkkitError("A piece's name can't be empty")
+        raise KitError("A piece's name can't be empty")
     if "piece" in changes:
         _plain_name(changes["piece"])
     if "files" in changes:
@@ -263,29 +263,29 @@ def set_piece(r: Repo, product: str, pid: str, **changes) -> dict:
     if "after" in changes:
         changes["after"] = ",".join(dict.fromkeys(_ids(changes["after"])))
     if changes.get("state") and changes["state"] not in STATES:
-        raise WorkkitError(f"State must be one of: {', '.join(STATES)}")
+        raise KitError(f"State must be one of: {', '.join(STATES)}")
     if not changes:
-        raise WorkkitError("Nothing to change")
+        raise KitError("Nothing to change")
     path = r.product(product) / "pieces.tsv"
 
     def edit():
         rows = _read_tsv(path, PIECE_COLUMNS)
         row = next((x for x in rows if x["id"].lower() == pid.lower()), None)
         if not row:
-            raise WorkkitError(f"No piece {pid} in {r.name} {product}")
+            raise KitError(f"No piece {pid} in {r.name} {product}")
         if wrong := [a for a in _ids(changes.get("after", "")) if a == row["id"].upper()
                      or a not in {x["id"].upper() for x in rows}]:
-            raise WorkkitError(f"--after names pieces of this list other than {row['id']}; not one: {', '.join(wrong)}")
+            raise KitError(f"--after names pieces of this list other than {row['id']}; not one: {', '.join(wrong)}")
         new = changes.get("state")
         if new == "merged" and not changes.get("pr", row["pr"]):
-            raise WorkkitError(f"{row['id']} has no PR, so it can't be merged. Work finished without a PR (a finding, an "
-                               f"outcome) is done: wk piece set {r.name} {product} {row['id']} --state done")
+            raise KitError(f"{row['id']} has no PR, so it can't be merged. Work finished without a PR (a finding, an "
+                               f"outcome) is done: nh piece set {r.name} {product} {row['id']} --state done")
         if new in FINISHED and (row["state"] not in FINISHED or (row["state"], new) == ("done", "merged")):
             # finished now, or again after being reopened; done then merged is new work (a fix built after the
             # finding), so it finishes again too. merged then done keeps its day.
             row["finished"] = date.today().isoformat()
         elif row["state"] in FINISHED and not row["finished"]:
-            row["finished"] = row["updated"]  # finished before work-kit kept this date: its last change is when it finished
+            row["finished"] = row["updated"]  # finished before nearly-headless kept this date: its last change is when it finished
         row.update(changes, updated=date.today().isoformat())
         _write_pieces(path, rows)
         return [path], said(row, changes), {"updated": row}
@@ -298,16 +298,16 @@ def rank_pieces(r: Repo, product: str, ids: str) -> dict:
     reordering is not progress."""
     order = [i.upper() for i in re.split(r"[,\s]+", ids or "") if i]
     if not order:
-        raise WorkkitError("Give the open pieces in the order you recommend, e.g. P3,P1,P7")
+        raise KitError("Give the open pieces in the order you recommend, e.g. P3,P1,P7")
     if len(set(order)) != len(order):
-        raise WorkkitError("Name each piece once")
+        raise KitError("Name each piece once")
     path = r.product(product) / "pieces.tsv"
 
     def edit():
         rows = _read_tsv(path, PIECE_COLUMNS)
         wrong = [i for i in order if i not in {x["id"].upper() for x in rows if x["state"] in OPEN}]
         if wrong:
-            raise WorkkitError(f"Not an open piece in {r.name} {product}: {', '.join(wrong)}")
+            raise KitError(f"Not an open piece in {r.name} {product}: {', '.join(wrong)}")
         for x in rows:
             x["rank"] = str(order.index(x["id"].upper()) + 1) if x["id"].upper() in order else ""
         _write_pieces(path, rows)
@@ -320,7 +320,7 @@ def rank_pieces(r: Repo, product: str, ids: str) -> dict:
 def _piece(r: Repo, product: str, pid: str) -> dict:
     row = next((x for x in pieces(r, product) if x["id"].lower() == pid.lower()), None)
     if not row:
-        raise WorkkitError(f"No piece {pid} in {r.name} {product}")
+        raise KitError(f"No piece {pid} in {r.name} {product}")
     return row
 
 
@@ -372,30 +372,30 @@ NOTE_LINE = "a note line is one short line: the detail belongs in the PR or a fi
 
 def note_line(add: str) -> str:
     """The line `note(add=...)` would write, refused before anything is written when it is too long, so a command that
-    writes something else first (wk piece set --bill) can check its note line up front."""
-    from . import check  # the limit wk check reports (check.long_lines), so the two can't drift
+    writes something else first (nh piece set --bill) can check its note line up front."""
+    from . import check  # the limit nh check reports (check.long_lines), so the two can't drift
     add = strip_date(_clean(add))
     if add and check.long_lines(f"- {date.today().isoformat()}: {add}"):
-        raise WorkkitError(f"That line is over {check.LINE_CHARS} characters, and {NOTE_LINE}")
+        raise KitError(f"That line is over {check.LINE_CHARS} characters, and {NOTE_LINE}")
     return add
 
 
 def note(r: Repo, product: str, pid: str, add: str = "", text: str | None = None, new_work: bool = False) -> dict:
     """A piece's memory: its brief, the owner's decisions, findings and where it stands. `text` replaces the whole note;
     `add` appends one line dated today (a date typed at its start is dropped). It lives in the repo, so it survives a
-    chat losing its memory and a new laptop. `new_work` (the `wk piece note --add` a supervisor writes) is refused on
+    chat losing its memory and a new laptop. `new_work` (the `nh piece note --add` a supervisor writes) is refused on
     a finished piece that is already billed: that work is a new piece, so its hours reach the next invoice."""
-    from . import check  # the limit wk check reports (check.long_lines), so the two can't drift
+    from . import check  # the limit nh check reports (check.long_lines), so the two can't drift
     row = _piece(r, product, pid)
     if new_work and add and (invoice := billed(r, product, pid)):
-        raise WorkkitError(f"{row['id']} is {row['state']} and billed ({invoice}). New work on it is a new piece: "
-                           f"wk piece add, with a note that points to {row['id']}. A release or teardown note "
+        raise KitError(f"{row['id']} is {row['state']} and billed ({invoice}). New work on it is a new piece: "
+                           f"nh piece add, with a note that points to {row['id']}. A release or teardown note "
                            f"(no new work) goes through with --billed-ok")
     add = note_line(add)
     if text is None and not add:
-        raise WorkkitError("Give the note's text (--file) or a line to add (--add)")
+        raise KitError("Give the note's text (--file) or a line to add (--add)")
     if text is not None and (n := check.long_lines(text)):
-        raise WorkkitError(f"{n} line(s) of that note are over {check.LINE_CHARS} characters, and {NOTE_LINE}")
+        raise KitError(f"{n} line(s) of that note are over {check.LINE_CHARS} characters, and {NOTE_LINE}")
     path = note_path(r, product, row["id"])
 
     def edit():
@@ -450,9 +450,9 @@ def ask(r: Repo, product: str, question: str, options: str = "", recommended: st
     answer into that piece's note), unless `list_wide` says it is about the whole list."""
     question = _clean(question)
     if not question:
-        raise WorkkitError("Ask a question")
+        raise KitError("Ask a question")
     if bool(_clean(piece)) == bool(list_wide):
-        raise WorkkitError("A question is about one piece or the whole list, not both" if list_wide else
+        raise KitError("A question is about one piece or the whole list, not both" if list_wide else
                            "Say which piece the question is about (--piece P3), or --list-wide when it is about the "
                            "whole list")
     path = r.product(product) / "questions.md"
@@ -472,7 +472,7 @@ def link_question(r: Repo, product: str, qid: str, piece: str = "", list_wide: b
     about the whole list."""
     path = r.product(product) / "questions.md"
     if bool(_clean(piece)) == bool(list_wide):
-        raise WorkkitError("A question is about one piece or the whole list, not both" if list_wide else
+        raise KitError("A question is about one piece or the whole list, not both" if list_wide else
                            "Say which piece the question is about (--piece P3), or --list-wide")
     pid = _piece(r, product, piece)["id"] if piece else ""
 
@@ -480,7 +480,7 @@ def link_question(r: Repo, product: str, qid: str, piece: str = "", list_wide: b
         items = _read_questions(path)
         q = next((i for i in items if i["id"].lower() == qid.lower()), None)
         if not q:
-            raise WorkkitError(f"No open question {qid} in {r.name} {product}")
+            raise KitError(f"No open question {qid} in {r.name} {product}")
         q["piece"], q["scope"] = pid, "" if pid else LIST_WIDE
         _write_questions(path, items)
         return [path], f"{product} {q['id']} is about {pid or 'the whole list'}", {"question": q}
@@ -492,7 +492,7 @@ def answer(r: Repo, product: str, qid: str, reply: str) -> dict:
     ("Owner answered Q2 (<question>): <answer>"); the supervisor also says it on the PR, where it acts on it."""
     reply = _clean(reply)
     if not reply:
-        raise WorkkitError("Give the owner's answer")
+        raise KitError("Give the owner's answer")
     return _close(r, product, qid, "answered", "Owner answered", reply)
 
 
@@ -503,7 +503,7 @@ def withdraw(r: Repo, product: str, qid: str, reason: str, piece: str = "") -> d
     so the decision lives where the supervisor rereads it, not only in a commit message."""
     reason = _clean(reason)
     if not reason:
-        raise WorkkitError("Say what you decided and why it can be undone (--reason)")
+        raise KitError("Say what you decided and why it can be undone (--reason)")
     return _close(r, product, qid, "withdrawn", "Supervisor withdrew", reason, _clean(piece))
 
 
@@ -515,14 +515,14 @@ def _close(r: Repo, product: str, qid: str, done: str, said: str, text: str, pie
         items = _read_questions(path)
         q = next((i for i in items if i["id"].lower() == qid.lower()), None)
         if not q:
-            raise WorkkitError(f"No open question {qid} in {r.name} {product}")
+            raise KitError(f"No open question {qid} in {r.name} {product}")
         on = q.get("piece") or piece
         if done == "withdrawn" and not on:
-            raise WorkkitError(f"{q['id']} is about the whole list: name the piece whose note keeps your decision "
+            raise KitError(f"{q['id']} is about the whole list: name the piece whose note keeps your decision "
                                "(--piece P3)")
         row = next((x for x in pieces(r, product) if on and x["id"].lower() == on.lower()), None)
         if piece and not row:
-            raise WorkkitError(f"No piece {piece} in {r.name} {product}")
+            raise KitError(f"No piece {piece} in {r.name} {product}")
         _write_questions(path, [i for i in items if i is not q])
         paths, result = [path], {done: q | {"answer" if done == "answered" else "reason": reply}}
         if row:
@@ -558,10 +558,10 @@ def order(r: Repo, product: str, add: str = "", drop: int = 0) -> dict:
             what = f"order added: {_clean(add)}"
         elif drop:
             if not 1 <= drop <= len(lines):
-                raise WorkkitError(f"No standing order {drop}")
+                raise KitError(f"No standing order {drop}")
             what = f"order dropped: {lines.pop(drop - 1)}"
         else:
-            raise WorkkitError("Give an order to add, or a number to drop")
+            raise KitError("Give an order to add, or a number to drop")
         core.atomic_text(path, "\n".join(["# Standing orders", ""] + [f"{n}. {t}" for n, t in enumerate(lines, 1)])
                          + "\n")
         return [path], f"{product} {what}", {"orders": lines}
@@ -604,27 +604,27 @@ def channels(r: Repo, channel: str = "", at: str = "") -> dict:
 
 def _move_checked(r: Repo, path: Path, channel: str, at: str, now: datetime) -> dict:
     if not (channel and at):
-        raise WorkkitError("Give the channel (--checked \"<its heading>\") and when its read started (--at)")
+        raise KitError("Give the channel (--checked \"<its heading>\") and when its read started (--at)")
     when = _time(at, "--at")
     if when is None:
-        raise WorkkitError("--at needs a time, e.g. 2026-11-04T10:30+05:00")
+        raise KitError("--at needs a time, e.g. 2026-11-04T10:30+05:00")
     if when > now + AHEAD:
-        raise WorkkitError(f"--at {_iso(when)} is in the future (now is {_iso(now)}): give the time the read started")
+        raise KitError(f"--at {_iso(when)} is in the future (now is {_iso(now)}): give the time the read started")
     if not path.is_file():
-        raise WorkkitError(f"{r.name} has no {DIR}/{CHANNELS} yet: wk channels {r.name} starts it")
+        raise KitError(f"{r.name} has no {DIR}/{CHANNELS} yet: nh channels {r.name} starts it")
     text = path.read_text(encoding="utf-8")
     if TEMPLATE_MARK in text:
-        raise WorkkitError(f"{core.posix(path)} still holds the template's example channels: fill it in with the owner "
+        raise KitError(f"{core.posix(path)} still holds the template's example channels: fill it in with the owner "
                            f"and delete its {TEMPLATE_MARK} line first")
     names = CHANNEL.findall(text)
     if channel not in names:
-        raise WorkkitError(f"No channel '{channel}' in {core.posix(path)}. Its channels: {', '.join(names) or 'none'}")
+        raise KitError(f"No channel '{channel}' in {core.posix(path)}. Its channels: {', '.join(names) or 'none'}")
     state = core.git_common_dir(r.top) / CHECKED
     with core.locked(r.top, "channels", CHECKED_LOCK):
         checked = _checked(state)
         was = _time(checked.get(channel, ""), f"The last check of {channel} in {core.posix(state)}")
         if was and when < was:
-            raise WorkkitError(f"{channel} was last checked at {_iso(was)}; a last-checked time never moves backwards")
+            raise KitError(f"{channel} was last checked at {_iso(was)}; a last-checked time never moves backwards")
         checked[channel] = _iso(when)
         core.write_json(state, {"channels": checked})
     return _channels_result(r, path, text, now) | {"moved": {channel: _iso(when)}}
@@ -642,7 +642,7 @@ def _time(value: str, what: str):
     try:
         at = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise WorkkitError(f"{what} '{value}' is not a time: give it like 2026-11-04T10:30+05:00") from exc
+        raise KitError(f"{what} '{value}' is not a time: give it like 2026-11-04T10:30+05:00") from exc
     return (at if at.tzinfo else at.astimezone()).replace(second=0, microsecond=0)
 
 
@@ -699,7 +699,7 @@ def _used(path: Path, items: list[dict]) -> int:
 
 def _write_inbox(path: Path, items: list[dict], used: int) -> None:
     out = ["# Inbox", "", "Messages routed to this list, each a link and one line. Its supervisor handles each one and "
-           "marks it handled (wk inbox done), which removes it.", "", f"Last id: I{used}", ""]
+           "marks it handled (nh inbox done), which removes it.", "", f"Last id: I{used}", ""]
     for x in items:
         out.append(f"## {x['id']} · {x['line']}")
         out += [f"- {f}: {x[f.lower()]}" for f in INBOX_FIELDS if x.get(f.lower())]
@@ -712,7 +712,7 @@ def filed(r: Repo, link: str) -> str:
     removed it anywhere in .work/ (an inbox entry since handled, a piece's note line, a question since answered)."""
     link = _clean(link)
     if not link:
-        raise WorkkitError("Give the message's link (--link)")
+        raise KitError("Give the message's link (--link)")
     for product in r.products():
         for x in _read_inbox(r.dir / product / INBOX):
             if x.get("link") == link:
@@ -731,13 +731,13 @@ def inbox_add(r: Repo, product: str, line: str, link: str, channel: str, when: s
     already, so a rerun over the same messages adds nothing."""
     line, link, channel = _clean(line), _clean(link), _clean(channel)
     if not line:
-        raise WorkkitError("Say in one line what the message is about")
+        raise KitError("Say in one line what the message is about")
     if len(line) > LINE_MAX:
-        raise WorkkitError(f"One line, at most {LINE_MAX} characters: the link carries the message")
+        raise KitError(f"One line, at most {LINE_MAX} characters: the link carries the message")
     if not link or " " in link:
-        raise WorkkitError("Give the message's link (--link), one that opens it")
+        raise KitError("Give the message's link (--link), one that opens it")
     if not channel:
-        raise WorkkitError("Name the channel it came from (--channel), as its heading in the channels file")
+        raise KitError("Name the channel it came from (--channel), as its heading in the channels file")
     path = r.product(product) / INBOX
     pid = _piece(r, product, piece)["id"] if _clean(piece) else ""
     if when:
@@ -762,14 +762,14 @@ def inbox_done(r: Repo, product: str, iid: str, how: str = "") -> dict:
     commit keeps its link, so the duplicate check still finds it."""
     how = _clean(how)
     if not how:
-        raise WorkkitError("Say how it was handled (--how), e.g. \"FYI\", \"note on P3\", \"new piece P9\"")
+        raise KitError("Say how it was handled (--how), e.g. \"FYI\", \"note on P3\", \"new piece P9\"")
     path = r.product(product) / INBOX
 
     def edit():
         items = _read_inbox(path)
         x = next((i for i in items if i["id"].lower() == iid.lower()), None)
         if not x:
-            raise WorkkitError(f"No inbox entry {iid} in {r.name} {product}")
+            raise KitError(f"No inbox entry {iid} in {r.name} {product}")
         _write_inbox(path, [i for i in items if i is not x], _used(path, items))
         return [path], f"{product} inbox {x['id']} handled: {how}", {"handled": x, "how": how}
     return r.write("inbox done", edit)
@@ -780,7 +780,7 @@ def inbox_done(r: Repo, product: str, iid: str, how: str = "") -> dict:
 def _who(cwd: Path) -> str:
     try:
         top, branch = core.checkout_of(cwd)
-    except WorkkitError:
+    except KitError:
         return core.posix(cwd)
     return f"{top.name}@{branch or 'detached'}"
 
@@ -789,7 +789,7 @@ def _day(day: str, flag: str = "--date") -> str:
     try:
         return date.fromisoformat(day).isoformat() if day else date.today().isoformat()  # 20261001 is stored as 2026-10-01
     except ValueError as exc:
-        raise WorkkitError(f"{flag} must be YYYY-MM-DD") from exc
+        raise KitError(f"{flag} must be YYYY-MM-DD") from exc
 
 
 def _line_key(r: Repo, product: str, key: str) -> str:
@@ -797,8 +797,8 @@ def _line_key(r: Repo, product: str, key: str) -> str:
     key, fields = (key or "").strip().lower(), r.products()[product]
     if key and f"line-{key}" not in fields:
         have = [k[5:] for k in fields if k.startswith("line-")]
-        raise WorkkitError(f"{r.name} {product} has no invoice line '{key}' (has: {', '.join(have) or 'none'}). "
-                           f"Add it: wk product set {r.name} {product} --line {key}=\"...\"")
+        raise KitError(f"{r.name} {product} has no invoice line '{key}' (has: {', '.join(have) or 'none'}). "
+                           f"Add it: nh product set {r.name} {product} --line {key}=\"...\"")
     return key
 
 
@@ -808,12 +808,12 @@ def _for(r: Repo, product: str, ids: str) -> str:
     chosen = [i.strip().upper() for i in (ids or "").split(",") if i.strip()]
     missing = [i for i in chosen if i not in known]
     if missing:
-        raise WorkkitError(f"No piece {', '.join(missing)} in {r.name} {product}")
+        raise KitError(f"No piece {', '.join(missing)} in {r.name} {product}")
     for choice, said in (("no", "not billing"), ("later", "bill later")):
         held = [i for i in chosen if known[i]["bill"] == choice]
         if held:
-            raise WorkkitError(f"{', '.join(held)} is marked {said} by the owner. If he now bills it, first "
-                               f"wk piece set {r.name} {product} {held[0]} --bill yes")
+            raise KitError(f"{', '.join(held)} is marked {said} by the owner. If he now bills it, first "
+                               f"nh piece set {r.name} {product} {held[0]} --bill yes")
     return ",".join(dict.fromkeys(chosen))
 
 
@@ -821,10 +821,10 @@ def add_hours(r: Repo, cwd: Path, product: str, hours: float, note: str, day: st
               for_pieces: str = "", line_key: str = "") -> dict:
     r.product(product)
     if not 0 < hours <= 24:
-        raise WorkkitError("Hours must be more than 0 and at most 24")
+        raise KitError("Hours must be more than 0 and at most 24")
     note = _clean(note)
     if not note:
-        raise WorkkitError("Say what the hours were for (--note)")
+        raise KitError("Say what the hours were for (--note)")
     day = _day(day)
     paid_for, line_key = _for(r, product, for_pieces), _line_key(r, product, line_key)
     path = r.dir / "hours.tsv"
@@ -834,7 +834,7 @@ def add_hours(r: Repo, cwd: Path, product: str, hours: float, note: str, day: st
         same = [x for x in rows if (x["date"], x["product"]) == (day, product) and not x["billed"]]
         if same and not again:
             first = same[0]
-            raise WorkkitError(f"{r.name} {product} already has {first['hours']}h on {day} ('{first['note']}', "
+            raise KitError(f"{r.name} {product} already has {first['hours']}h on {day} ('{first['note']}', "
                                f"recorded by {first['by']}). If this is separate work the owner stated, add --again.")
         row = {"date": day, "product": product, "hours": f"{hours:g}", "note": note, "by": _who(cwd), "billed": "",
                "pieces": paid_for, "line_key": line_key}
@@ -847,16 +847,16 @@ def fix_hours(r: Repo, product: str, day: str, hours: float | None = None, note:
               for_pieces: str | None = None, remove: bool = False, was: str = "", nth: int = 0,
               line_key: str | None = None) -> dict:
     """Change or remove one unbilled entry: the day's only one, the one whose note is `was` (else contains it), or the
-    `nth` of the day's entries in the order `wk hours list` shows them. `line_key` moves it to a named invoice line of
+    `nth` of the day's entries in the order `nh hours list` shows them. `line_key` moves it to a named invoice line of
     the list ("" back to its usual line). Billed entries are frozen: they are on an invoice."""
     r.product(product)
     day = _day(day)
     if not remove and hours is None and note is None and for_pieces is None and line_key is None:
-        raise WorkkitError("Say what to change (hours, --note, --for, --line-key) or --remove")
+        raise KitError("Say what to change (hours, --note, --for, --line-key) or --remove")
     if hours is not None and not 0 < hours <= 24:
-        raise WorkkitError("Hours must be more than 0 and at most 24")
+        raise KitError("Hours must be more than 0 and at most 24")
     if note is not None and not _clean(note):
-        raise WorkkitError("A note can't be empty")
+        raise KitError("A note can't be empty")
     paid_for = None if for_pieces is None else _for(r, product, for_pieces)
     line_key = None if line_key is None else _line_key(r, product, line_key)
     path = r.dir / "hours.tsv"
@@ -866,22 +866,22 @@ def fix_hours(r: Repo, product: str, day: str, hours: float | None = None, note:
         day_rows = [x for x in rows if (x["date"], x["product"]) == (day, product)]
         if nth:
             if not 0 < nth <= len(day_rows):
-                raise WorkkitError(f"{r.name} {product} has {len(day_rows)} entries on {day}, so no --nth {nth}")
+                raise KitError(f"{r.name} {product} has {len(day_rows)} entries on {day}, so no --nth {nth}")
             same = [day_rows[nth - 1]]
         else:
             want = _clean(was).lower()
             same = ([x for x in day_rows if x["note"].lower() == want]
                     or [x for x in day_rows if want in x["note"].lower()])
         if not same:
-            raise WorkkitError(f"{r.name} {product} has no hours on {day}" + (f" with '{was}' in the note" if was else ""))
+            raise KitError(f"{r.name} {product} has no hours on {day}" + (f" with '{was}' in the note" if was else ""))
         if len(same) > 1:
-            raise WorkkitError(f"{r.name} {product} has {len(same)} entries on {day} that match; choose one with --was \"<its whole note>\" or --nth: "
+            raise KitError(f"{r.name} {product} has {len(same)} entries on {day} that match; choose one with --was \"<its whole note>\" or --nth: "
                                + "; ".join(f"{i}. {x['hours']}h '{x['note']}'" + (f" (on {x['billed']})" if x["billed"]
                                                                                    else "")
                                            for i, x in enumerate(day_rows, 1) if any(x is y for y in same)))
         row = same[0]
         if row["billed"]:
-            raise WorkkitError(f"That entry is on {row['billed']} and stays as it is. A billed entry is never changed.")
+            raise KitError(f"That entry is on {row['billed']} and stays as it is. A billed entry is never changed.")
         before = dict(row)
         if remove:
             rows.remove(row)
@@ -909,11 +909,11 @@ def mark_hours(r: Repo, through: str, label: str, expect: float, products: list[
     label is used once per repo, and a marked row is never unmarked."""
     label = _clean(label)
     if not label:
-        raise WorkkitError("Give the label the hours are marked with (--as), e.g. INV-007")
+        raise KitError("Give the label the hours are marked with (--as), e.g. INV-007")
     try:
         through = date.fromisoformat(through).isoformat()
     except ValueError as exc:
-        raise WorkkitError("--through must be YYYY-MM-DD") from exc
+        raise KitError("--through must be YYYY-MM-DD") from exc
     for p in products:
         r.product(p)
     path = r.dir / "hours.tsv"
@@ -921,17 +921,17 @@ def mark_hours(r: Repo, through: str, label: str, expect: float, products: list[
     def edit():
         rows = _read_tsv(path, HOUR_COLUMNS)
         if any(x["billed"] == label for x in rows):
-            raise WorkkitError(f"{r.name} already has hours marked {label}; a label is used once")
+            raise KitError(f"{r.name} already has hours marked {label}; a label is used once")
         chosen = [x for x in rows if not x["billed"] and x["date"] <= through
                   and (not products or x["product"] in products)]
         total = round(sum(float(x["hours"]) for x in chosen), 2)
         if not chosen:
-            raise WorkkitError(f"{r.name} has no unmarked hours through {through}")
+            raise KitError(f"{r.name} has no unmarked hours through {through}")
         if abs(total - expect) > 0.005:
-            raise WorkkitError(f"{r.name} has {total:g}h unmarked through {through}, not the {expect:g}h expected. "
+            raise KitError(f"{r.name} has {total:g}h unmarked through {through}, not the {expect:g}h expected. "
                                "Hours changed since they were counted: count again.")
         if digest and rows_digest(chosen) != digest:
-            raise WorkkitError(f"{r.name}'s unmarked hours through {through} changed since they were counted (same "
+            raise KitError(f"{r.name}'s unmarked hours through {through} changed since they were counted (same "
                                "total, different entries): count again.")
         for x in chosen:
             x["billed"] = label
@@ -960,7 +960,7 @@ def status(s: dict, recent_days: int = 7) -> list[dict]:
         try:
             r = Repo(s, name)
             products = r.products()
-        except WorkkitError as exc:
+        except KitError as exc:
             out.append({"repo": name, "error": str(exc)})
             continue
         for product, fields in products.items():
@@ -1007,15 +1007,15 @@ def _pr_number(pr: str) -> str:
 
 
 def _gh_prs(top: Path, wait: float = GH_WAIT) -> dict:
-    """The repo's recent PRs by number, with state and checks. WorkkitError when GitHub doesn't answer in `wait`
+    """The repo's recent PRs by number, with state and checks. KitError when GitHub doesn't answer in `wait`
     seconds."""
     try:
         result = core.run(["gh", "pr", "list", "--state", "all", "--limit", "100", "--json",
                            "number,state,isDraft,statusCheckRollup"], wait, cwd=str(top))
     except OSError as exc:
-        raise WorkkitError(f"gh failed: {exc}") from exc
+        raise KitError(f"gh failed: {exc}") from exc
     if result.returncode:
-        raise WorkkitError("gh: " + (result.stderr.strip() or "failed"))
+        raise KitError("gh: " + (result.stderr.strip() or "failed"))
     return {str(x["number"]): x for x in json.loads(result.stdout or "[]")}
 
 
@@ -1047,7 +1047,7 @@ def _recall_list(s: dict, r: Repo, product: str, fields: dict, owner: str, prs: 
         left = deadline - time.monotonic()
         try:
             prs[r.name] = _gh_prs(r.top, left) if left >= 1 else None
-        except (WorkkitError, ValueError, TypeError, KeyError):
+        except (KitError, ValueError, TypeError, KeyError):
             prs[r.name] = None
     known = prs.get(r.name)
     pieces = []
@@ -1065,25 +1065,25 @@ def _recall_list(s: dict, r: Repo, product: str, fields: dict, owner: str, prs: 
     branches = {p["branch"] for p in pieces if p["branch"]}
     try:
         held = [g for g in turn_rows(r.top) if g["holder"] in branches]
-    except (WorkkitError, OSError, ValueError, KeyError):
+    except (KitError, OSError, ValueError, KeyError):
         held = []
     waiting = _read_inbox(d / INBOX)
     try:
         queue = queue_lines(queue_status(s, r, product, wait=deadline - time.monotonic()))
     except Exception as exc:  # noqa: BLE001 - the start block must never fail
-        queue = [f"Queue: couldn't be read ({_short(str(exc), 120)}): wk piece next {r.name} {product}"]
+        queue = [f"Queue: couldn't be read ({_short(str(exc), 120)}): nh piece next {r.name} {product}"]
     return {"fixes": _to_fix(s, r, product), "queue": queue, "title": f"{r.name} / {product}" + (f" ({fields['title']})" if fields.get("title") else ""),
             "repo": r.name, "product": product, "questions": _read_questions(d / "questions.md"), "pieces": pieces,
             "gh": "PR status unavailable (GitHub didn't answer)" if prs.get(r.name, {}) is None else "",
             "turns": "Turns held by this list's builders: " + "; ".join(
                 f"{g['holder']} on {g['resource']} ({', '.join(g['items'])}; {g['state']})" for g in held)
             if held else "",
-            "inbox": f"Inbox: {len(waiting)} message(s) to handle: wk inbox list {r.name} {product}" if waiting else "",
+            "inbox": f"Inbox: {len(waiting)} message(s) to handle: nh inbox list {r.name} {product}" if waiting else "",
             "orders": _read_orders(d / "orders.md")}
 
 
 def _to_fix(s: dict, r: Repo, product: str) -> list[dict]:
-    """The list's wk check findings that need no network (check.at_start: its own files only, so the start stays
+    """The list's nh check findings that need no network (check.at_start: its own files only, so the start stays
     fast), one line each; those only the owner's yes settles are marked. Never fails: an unreadable list shows none."""
     from . import check  # check reads work's records, so it is imported when used
     try:
@@ -1105,8 +1105,8 @@ def _render(why: str, lists: list[dict], todo_notes: bool = True, keep: int | No
     """Most important first: questions, pieces being built or ready, to-fix lines, to-do pieces, inbox, standing
     orders. keep: how many open pieces and to-fix lines to show in all, by importance across the lists; the rest are
     counted on one line per list."""
-    out = [f"work-kit: your list as it stands now{f' ({why})' if why else ''}. "
-           "Full notes: wk piece note <repo> <product> <id>."]
+    out = [f"nearly-headless: your list as it stands now{f' ({why})' if why else ''}. "
+           "Full notes: nh piece note <repo> <product> <id>."]
     kept = None if keep is None else set(_importance(lists)[:keep])
     for x in lists:
         out.append(f"\n{x['title']}")
@@ -1124,12 +1124,12 @@ def _render(why: str, lists: list[dict], todo_notes: bool = True, keep: int | No
             if not todo:  # the queue, then to-fix lines, rank after the questions and the pieces being built
                 out += x.get("queue") or []
                 fixes = [f for f in x["fixes"] if kept is None or id(f) in kept]
-                out += [f"To fix (yours, unless marked; wk check {x['repo']} {x['product']} for all):"] + \
+                out += [f"To fix (yours, unless marked; nh check {x['repo']} {x['product']} for all):"] + \
                     [f["line"] for f in fixes] if fixes else []
                 gone = len(x["fixes"]) - len(fixes)
-                out += [f"{gone} more to fix: wk check {x['repo']} {x['product']}"] if gone else []
+                out += [f"{gone} more to fix: nh check {x['repo']} {x['product']}"] if gone else []
         hidden = len(ordered) - len(shown)
-        out += [f"{hidden} more open pieces: wk piece list {x['repo']} {x['product']}"] if hidden else []
+        out += [f"{hidden} more open pieces: nh piece list {x['repo']} {x['product']}"] if hidden else []
         out += [y for y in (x["gh"], x["turns"], x["inbox"]) if y]
         out += ["Standing orders:"] + [f"{n}. {t}" for n, t in enumerate(x["orders"], 1)] if x["orders"] else []
     return "\n".join(out)
@@ -1157,7 +1157,7 @@ def recall(s: dict, ids: list[str], cwd: Path, source: str = "") -> str:
     ours = lambda fields: any(i in str(fields.get("supervisor", "")) for i in ids)  # noqa: E731
     try:
         common = core.git_common_dir(cwd)
-    except WorkkitError:
+    except KitError:
         common = None  # not in a checkout: only a recorded supervisor link can match
     mine, here = [], []
     for name in s.get("repos") or {}:
@@ -1166,7 +1166,7 @@ def recall(s: dict, ids: list[str], cwd: Path, source: str = "") -> str:
             products = r.products()
             in_repo = common is not None and any(core.same_path(core.git_common_dir(t), common)
                                                  for t in {r.top, r.list_top})
-        except WorkkitError:
+        except KitError:
             continue  # a repo that can't be read never stops the others
         for product, fields in products.items():
             if ours(fields):
@@ -1176,7 +1176,7 @@ def recall(s: dict, ids: list[str], cwd: Path, source: str = "") -> str:
     if mine:
         try:
             owner = settings.approver(s)
-        except WorkkitError:
+        except KitError:
             owner = ""
         prs, deadline = {}, time.monotonic() + GH_WAIT
         return _capped(WHY.get(source, ""), [_recall_list(s, r, p, f, owner, prs, deadline) for r, p, f in mine])
@@ -1190,8 +1190,8 @@ def recall(s: dict, ids: list[str], cwd: Path, source: str = "") -> str:
             lines.append(f"{r.name} {product}: {len(rows)} open, {len(qs)} question(s)")
     if not lines:
         return ""
-    return ("work-kit lists in this repo: " + "; ".join(lines) + ". Each list in full: wk piece list, "
-            "wk question list, wk order list (each <repo> <product>).")
+    return ("nearly-headless lists in this repo: " + "; ".join(lines) + ". Each list in full: nh piece list, "
+            "nh question list, nh order list (each <repo> <product>).")
 
 
 # ---------------------------------------------------------------- the owner-approved queue
@@ -1202,7 +1202,7 @@ def _paths(value: str) -> str:
     items = [p.strip().replace("\\", "/").removeprefix("./") for p in re.split(r"[,\s]+", value or "") if p.strip()]
     if any(i.lower() == "none" for i in items):
         if len(items) > 1:
-            raise WorkkitError("--files is either the files the piece will touch or none, not both")
+            raise KitError("--files is either the files the piece will touch or none, not both")
         return "none"
     return ",".join(dict.fromkeys(items))
 
@@ -1246,7 +1246,7 @@ def queue_plan(rows: list[dict], limit: int | None, prs: dict | None, held: list
         if unmet:
             why = f"after {', '.join(unmet)}, not merged yet"
         elif not x.get("files"):
-            why = f"names no files: wk piece set <repo> <product> {x['id']} --files ... (or none)"
+            why = f"names no files: nh piece set <repo> <product> {x['id']} --files ... (or none)"
         elif files and prs is None:
             why = "GitHub didn't answer, so the open PRs' files are unknown"
         elif files and held is None:
@@ -1271,14 +1271,14 @@ OPEN_PRS = "1000"  # every open PR, so the overlap check misses none (gh lists 3
 
 
 def open_pr_files(top: Path, wait: float = GH_WAIT) -> dict:
-    """The repo's open PRs (any list's) with the files each changes. WorkkitError when GitHub doesn't answer."""
+    """The repo's open PRs (any list's) with the files each changes. KitError when GitHub doesn't answer."""
     try:
         result = core.run(["gh", "pr", "list", "--state", "open", "--limit", OPEN_PRS, "--json",
                            "number,headRefName,files"], wait, cwd=str(top))
     except OSError as exc:
-        raise WorkkitError(f"gh failed: {exc}") from exc
+        raise KitError(f"gh failed: {exc}") from exc
     if result.returncode:
-        raise WorkkitError("gh: " + (result.stderr.strip() or "failed"))
+        raise KitError("gh: " + (result.stderr.strip() or "failed"))
     return pr_files(json.loads(result.stdout or "[]"))
 
 
@@ -1301,17 +1301,17 @@ def queue_status(s: dict, r: Repo, product: str, prs=NOT_ASKED, wait: float = GH
     if prs is NOT_ASKED:
         try:
             prs = open_pr_files(r.top, wait) if wait >= 1 else None
-        except (WorkkitError, ValueError, TypeError, KeyError):
+        except (KitError, ValueError, TypeError, KeyError):
             prs = None
     try:
         held = turn_rows(r.top)
-    except (WorkkitError, OSError, ValueError, KeyError):
+    except (KitError, OSError, ValueError, KeyError):
         held = None
     return queue_plan(rows, limit, prs, held)
 
 
 def queue_lines(q: dict) -> list[str]:
-    """The queue as recall and wk piece next print it."""
+    """The queue as recall and nh piece next print it."""
     if not q["items"]:
         return []
     if q["limit"] is None:
@@ -1330,23 +1330,23 @@ def queue_pieces(r: Repo, product: str, ids: str) -> dict:
     empty = (ids or "").strip().lower() == "none"
     order = [] if empty else _ids(ids)
     if not empty and not order:
-        raise WorkkitError("Give the to-do pieces in the order the owner approved, e.g. P5,P7, or none to empty the queue")
+        raise KitError("Give the to-do pieces in the order the owner approved, e.g. P5,P7, or none to empty the queue")
     if len(set(order)) != len(order):
-        raise WorkkitError("Name each piece once")
+        raise KitError("Name each piece once")
     path = r.product(product) / "pieces.tsv"
 
     def edit():
         rows = _read_tsv(path, PIECE_COLUMNS)
         todo = {x["id"].upper(): x for x in rows if x["state"] == "todo"}
         if wrong := [i for i in order if i not in todo]:
-            raise WorkkitError(f"Only a to-do piece can be queued; not one in {r.name} {product}: {', '.join(wrong)}")
+            raise KitError(f"Only a to-do piece can be queued; not one in {r.name} {product}: {', '.join(wrong)}")
         if no_brief := [i for i in order if not (p := note_path(r, product, i)).is_file()
                         or not p.read_text(encoding="utf-8").strip()]:
-            raise WorkkitError(f"A queued piece starts from its brief, in its note, and {', '.join(no_brief)} has none: "
-                               f"wk piece note {r.name} {product} <id> --file brief.md")
+            raise KitError(f"A queued piece starts from its brief, in its note, and {', '.join(no_brief)} has none: "
+                               f"nh piece note {r.name} {product} <id> --file brief.md")
         if no_files := [i for i in order if not todo[i]["files"]]:
-            raise WorkkitError(f"Name the files each queued piece will touch, so it never starts on files an unmerged PR "
-                               f"or a turn holds: wk piece set {r.name} {product} <id> --files \"a.py,docs/\" (or "
+            raise KitError(f"Name the files each queued piece will touch, so it never starts on files an unmerged PR "
+                               f"or a turn holds: nh piece set {r.name} {product} <id> --files \"a.py,docs/\" (or "
                                f"--files none). Missing: {', '.join(no_files)}")
         for x in rows:
             x["queue"] = str(order.index(x["id"].upper()) + 1) if x["id"].upper() in order else ""
