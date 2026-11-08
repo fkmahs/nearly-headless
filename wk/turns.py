@@ -319,8 +319,8 @@ def missing_sections(body: str) -> list[str]:
 
 def _text_checks(s: dict, top: Path, data: dict, where: str, pr: int) -> list[str]:
     """Refuses a PR whose description lacks one of the four sections (one opened before this laptop took them up,
-    `pr_sections_from`, only gets a warning, returned), and, on a public repo, one whose title, description or
-    comments hold a private name (where, never the name)."""
+    `pr_sections_from`, only gets a warning, returned), and, on a public repo, one whose title, description, comments,
+    reviews or review comments on code hold a private name (where, never the name)."""
     from . import privacy
     warnings = []
     missing = missing_sections(data.get("body") or "")
@@ -334,14 +334,44 @@ def _text_checks(s: dict, top: Path, data: dict, where: str, pr: int) -> list[st
                         "so this only warns)")
     if settings.is_public(settings.info_of(s, top)[1]):
         pat = privacy.pattern(privacy.terms(s))
+        def held(items, label):
+            return [label(i, c) for i, c in enumerate(items or [], 1) if privacy.lines_with(c.get("body") or "", pat)]
         hits = (["the title"] if privacy.lines_with(data.get("title") or "", pat) else []) + \
             [f"the description, line {n}" for n in privacy.lines_with(data.get("body") or "", pat)] + \
-            [f"comment {i}" for i, c in enumerate(data.get("comments") or [], 1)
-             if privacy.lines_with(c.get("body") or "", pat)]
+            held(data.get("comments"), lambda i, c: f"comment {i}") + \
+            held(data.get("reviews"), lambda i, c: f"review {i}") + \
+            held(_review_comments(top, where, pr), lambda i, c: f"review comment {i} on {c.get('path') or 'the code'}")
         if hits:
             raise Refused(f"{where} is public, and PR #{pr} has a private name in {'; '.join(hits)}. Reword it (a "
                           "comment: edit or delete it), then run this gate again.")
     return warnings
+
+
+def _review_comments(top: Path, where: str, pr: int) -> list[dict]:
+    """A PR's review comments on lines of code (all pages), which gh pr view doesn't give."""
+    text, at, found = _gh(top, "api", "--paginate", f"repos/{where}/pulls/{pr}/comments?per_page=100").strip(), 0, []
+    decoder = json.JSONDecoder()
+    while at < len(text):  # one JSON array per page, back to back
+        page, at = decoder.raw_decode(text, at)
+        found += [c for c in (page if isinstance(page, list) else []) if isinstance(c, dict)]
+        while at < len(text) and text[at].isspace():
+            at += 1
+    return found
+
+
+def _branch_check(s: dict, top: Path, ref: str, head: str, where: str, pr: int) -> None:
+    """On a public repo, refuses a PR whose commit messages or added lines hold a private name: the push hook's own
+    scanner (privacy.change_hits), so a PR pushed from another laptop or a fork, or edited on GitHub, is checked too."""
+    from . import privacy
+    if not settings.is_public(settings.info_of(s, top)[1]):
+        return
+    try:
+        hits = privacy.branch_hits(top, ref, head, privacy.pattern(privacy.terms(s)))[0]
+    except KitError as exc:
+        raise Refused(f"{where} PR #{pr}: {exc}, so whether it holds a private name is unknown. Retry.") from exc
+    if hits:
+        raise Refused(f"{where} is public, and PR #{pr} has a private name in {'; '.join(hits)}. Its builder rewords "
+                      "it in a new commit (a message: the owner decides), then run this gate again.")
 
 
 def gate_fresh(cwd: Path, s: dict, pr: int, sha: str = "") -> dict:
@@ -353,7 +383,7 @@ def gate_fresh(cwd: Path, s: dict, pr: int, sha: str = "") -> dict:
     top = core.checkout_of(cwd)[0]
     data = json.loads(_gh(top, "pr", "view", str(pr), "--json",
                           "state,headRefOid,headRefName,baseRefName,url,statusCheckRollup,title,body,createdAt,"
-                          "comments") or "{}")
+                          "comments,reviews") or "{}")
     where = "/".join((data.get("url") or "").split("/")[3:5]) or core.posix(top)  # owner/repo, from the PR's link
     if data.get("state") != "OPEN":
         raise Refused(f"{where} PR #{pr} is {(data.get('state') or 'unknown').lower()}, not open")
@@ -366,6 +396,7 @@ def gate_fresh(cwd: Path, s: dict, pr: int, sha: str = "") -> dict:
     if not has_commit(top, head, pr):
         raise Refused(f"{where} PR #{pr}'s head {head[:12]} could not be fetched, so whether it has the latest {base} "
                       "is unknown. Retry.")
+    _branch_check(s, top, ref, head, where, pr)
     both = changed_on_both(top, head, ref)
     if both:
         shown = ", ".join(both[:8]) + (f" and {len(both) - 8} more" if len(both) > 8 else "")
@@ -508,6 +539,6 @@ def refresh(cwd: Path, s: dict, pr: int, wait_minutes: float = 30.0, poll: float
     if why:
         raise Refused(f"PR #{pr}: pushed the clean merge {new[:12]}, but {why}. No Ready posted: the builder is needed.")
     _gh(top, "pr", "comment", str(pr), "--body",
-        f"Ready @ {new}\n\nwk refresh: a clean merge of {ref}, with no builder and nothing resolved by hand. "
+        f"Ready @ {new}\n\nnh refresh: a clean merge of {ref}, with no builder and nothing resolved by hand. "
         f"CI green on {new[:12]}. Local checks were not re-run: CI is the full proof.\n\nGap checks: none")
     return {"ok": True, "pr": pr, "sha": new, "refreshed": f"clean merge of {ref}, CI green, Ready posted"}

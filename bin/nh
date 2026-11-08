@@ -4,11 +4,7 @@
 # so `nh` from this folder on the PATH runs that one. `nh setup` never forwards: it makes this checkout the kit.
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -z "$NH_FORWARDED" ] && [ "$1" != "setup" ]; then
-  S="${NH_SETTINGS:-$WORKKIT_SETTINGS}"
-  if [ -z "$S" ]; then
-    S="$HOME/.nearly-headless/settings.toml"
-    [ -d "$HOME/.nearly-headless" ] || S="$HOME/.workkit/settings.toml"  # the folder before 1.56.0, until setup moves it
-  fi
+  S="${NH_SETTINGS:-$HOME/.nearly-headless/settings.toml}"
   if [ -f "$S" ]; then
     T="$(sed -n -e '/^[[:space:]]*\[/q' -e 's/^kit[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$S" | head -n 1)"
     if [ -n "$T" ] && [ -f "$T/bin/nh" ] && [ "$(cd "$T" && pwd -P)" != "$(cd "$KIT" && pwd -P)" ]; then

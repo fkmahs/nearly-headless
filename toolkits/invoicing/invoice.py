@@ -65,7 +65,7 @@ def wk(*args: str) -> object:
     run = subprocess.run([sys.executable, "-P", "-m", "wk", "--json", *args], capture_output=True, text=True,
                          encoding="utf-8", env=env)
     if run.returncode not in (0, 3):
-        raise Refused(run.stderr.strip() or f"wk {' '.join(args)} failed")
+        raise Refused(run.stderr.strip() or f"nh {' '.join(args)} failed")
     if run.returncode == 3:
         print("invoice: hours marked but NOT on GitHub yet; push that repo's main", file=sys.stderr)
     return json.loads(run.stdout)

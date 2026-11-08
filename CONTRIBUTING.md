@@ -17,7 +17,7 @@ nearly-headless stays generic: no client names, tickets, billing figures or pers
 | `wk/check.py` | `python -m unittest tests.test_check` |
 | `wk/usage.py` | `python -m unittest tests.test_usage tests.test_check tests.test_health` |
 | `wk/health.py` | `python -m unittest tests.test_health` |
-| `wk/upkeep.py`, `wk/dashboard.py`, `wk/page.html`, `wk/guard.py`, `templates/tests.yml`, adding or renaming a skill | `python -m unittest tests.test_upkeep tests.test_system` |
+| `wk/upkeep.py`, `wk/dashboard.py`, `wk/page.html`, `wk/guard.py`, `templates/tests.yml`, `templates/instructions.md`, adding or renaming a skill | `python -m unittest tests.test_upkeep tests.test_system` |
 | `wk/system.py` | `python -m unittest tests.test_system tests.test_upkeep` |
 | `wk/keepout.py` | `python -m unittest tests.test_check tests.test_upkeep` |
 | `wk/settings.py` | `python -m unittest tests.test_work tests.test_upkeep` |

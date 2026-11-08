@@ -174,7 +174,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("repo", nargs="?")
     s.add_argument("product", nargs="?")
     s.add_argument("--fix-dates", action="store_true", help="rewrite one list's doubled or unreadable note dates")
-    s.add_argument("--fix", action="store_true", help="make the mechanical fixes only, through wk's usual writes")
+    s.add_argument("--fix", action="store_true", help="make the mechanical fixes only, through nh's usual writes")
     s.add_argument("--dry-run", action="store_true", help="--fix: say what it would change, change nothing")
     s.add_argument("--ack", metavar="SHA", help="a commit on the base branch the owner has looked at, or "
                                                 "branch:<name>, a branch the owner keeps, or "
@@ -248,12 +248,14 @@ def parser() -> argparse.ArgumentParser:
                                        "private name was found; only where, never the name, is printed)",
                        description="push: git's pre-push hook in a public checkout (nh setup installs it) checks the "
                                    "branch, commit messages and added lines. scan FOLDER: every file in a folder. pr: "
-                                   "the GitHub job, from the PRIVATE_TERMS secret. secret OWNER/REPO: sets that secret "
-                                   "from this laptop's list. tree FOLDER: builds the clean public copy of this repo "
-                                   "(every file on --ref except .work/) in a new folder, then scans it. The list: "
-                                   "every repo, folder and client in the settings, the owner's names, and [privacy] "
-                                   "terms.")
-    s.add_argument("what", choices=["push", "scan", "pr", "secret", "tree"])
+                                   "the GitHub job on each PR (its text, commits and the lines it adds), from the "
+                                   "PRIVATE_TERMS secret. sweep: the daily GitHub job (tracked files, recent commits, "
+                                   "issues, PRs and comments). secret OWNER/REPO: sets that secret from this laptop's "
+                                   "list and records its fingerprint, which nh doctor compares. tree FOLDER: builds "
+                                   "the clean public copy of this repo (every file on --ref except .work/) in a new "
+                                   "folder, then scans it. The list: every repo, folder and client in the settings, "
+                                   "the owner's names, and [privacy] terms.")
+    s.add_argument("what", choices=["push", "scan", "pr", "sweep", "secret", "tree"])
     s.add_argument("rest", nargs="*", help="push: git's remote name and URL; scan, tree: the folder; secret: "
                                            "owner/repo")
     s.add_argument("--term", action="append", default=[], help="scan, tree: one more private name, for this run only")
@@ -582,8 +584,8 @@ def _privacy(args, cwd: Path) -> int:
     """Runs before the daily update, so a push is never held up by one."""
     from . import privacy, settings
     try:
-        if args.what == "pr":
-            code, text = privacy.ci(cwd=cwd)
+        if args.what in ("pr", "sweep"):
+            code, text = (privacy.ci if args.what == "pr" else privacy.sweep)(cwd=cwd)
             print(text)
             return code
         s = settings.load(settings.path(args.settings))

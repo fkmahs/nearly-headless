@@ -110,14 +110,6 @@ class Guard(unittest.TestCase):
         self.assertFalse(privacy.install_hook(self.pub, KIT / "bin" / "nh")["installed"])
         self.assertEqual(path.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
 
-    def test_the_hook_an_older_release_wrote_is_replaced(self):
-        path = privacy.hook_path(self.pub)
-        path.write_text('#!/bin/sh\n# work-kit: the privacy guard: a push ...\nexec sh "/old/bin/wk" privacy push "$@"\n',
-                        encoding="utf-8")
-        self.assertFalse(privacy.hook_installed(self.pub))  # doctor asks for setup
-        self.assertTrue(privacy.install_hook(self.pub, KIT / "bin" / "nh")["changed"])
-        self.assertEqual(path.read_text(encoding="utf-8"), privacy.hook_text(KIT / "bin" / "nh"))
-
     def test_the_clean_tree_leaves_out_the_list_and_is_scanned(self):
         (self.pub / ".work").mkdir()
         (self.pub / ".work" / "pieces.tsv").write_text("Acme Corp's piece\n", encoding="utf-8")
@@ -140,22 +132,79 @@ class Guard(unittest.TestCase):
         self.assertIn("x.md line 1", out2.getvalue())
         self.assertNotIn("Globex", out2.getvalue())
 
+    def commit(self, name, text, message):
+        (self.pub / name).write_text(text, encoding="utf-8")
+        sh(self.pub, "add", "-A")
+        sh(self.pub, "commit", "-q", "-m", message)
+        return sh(self.pub, "rev-parse", "HEAD").stdout.strip()
+
     def test_the_github_job(self):
-        sh(self.pub, "commit", "--allow-empty", "-m", "Second\n\nAcme Corp asked")
-        base, head = (sh(self.pub, "rev-parse", r).stdout.strip() for r in ("HEAD~1", "HEAD"))
+        base = sh(self.pub, "rev-parse", "HEAD").stdout.strip()
         event = self.tmp / "event.json"
-        pr = {"title": "Faster list", "body": "## What was wrong\nslow", "head": {"sha": head, "ref": "faster"},
+        pr = {"title": "Faster list", "body": "## What was wrong\nslow", "head": {"ref": "faster"},
               "base": {"sha": base}}
-        event.write_text(json.dumps({"pull_request": pr}), encoding="utf-8")
-        env = {"GITHUB_EVENT_PATH": str(event), "PRIVATE_TERMS": "Acme Corp\nGlobex\n"}
-        code, text = privacy.ci(env, self.pub)
+
+        def run(head, env_terms="Acme Corp\nGlobex\n"):
+            pr["head"]["sha"] = head
+            event.write_text(json.dumps({"pull_request": pr}), encoding="utf-8")
+            return privacy.ci({"GITHUB_EVENT_PATH": str(event), "PRIVATE_TERMS": env_terms}, self.pub)
+
+        head = self.commit("b.txt", "one\n", "Second\n\nAcme Corp asked")  # a commit message
+        code, text = run(head)
         self.assertEqual(code, 1)
         self.assertIn("message, line 3", text)
         self.assertNotIn("Acme", text)
         code, text = privacy.ci({"GITHUB_EVENT_PATH": str(event)}, self.pub)
         self.assertEqual((code, text[:30]), (0, "Privacy check: not checked (no"))
-        env["PRIVATE_TERMS"] = "Globex"
-        self.assertEqual(privacy.ci(env, self.pub)[0], 0)
+        self.assertEqual(run(head, "Globex")[0], 0)
+        sh(self.pub, "reset", "-q", "--hard", base)
+        head = self.commit("b.txt", "one\nmade for globex\n", "Add b")  # a line the PR adds
+        code, text = run(head)
+        self.assertEqual(code, 1)
+        self.assertIn("b.txt line 2", text)
+        self.assertNotIn("lobex", text)
+        head = self.commit("b.txt", "one\n", "Reword b")  # taken out again: what the PR adds is clean
+        code, text = run(head)
+        self.assertEqual(code, 0, text)
+        self.assertIn("Privacy check: passed (2 commits, the lines they add", text)
+
+    def test_the_daily_sweep(self):
+        self.commit("b.txt", "fine\n", "Add b")
+        names = {"PRIVATE_TERMS": "Acme Corp\nGlobex", "GITHUB_REPOSITORY": "o/r"}
+        github = {"repos/o/r/issues?state=open&per_page=100": [{"number": 3, "title": "Slow list", "body": "x"}],
+                  "repos/o/r/pulls/5/reviews?per_page=100": [{"body": "ok", "id": 1}]}
+        api = lambda path: github.get(path.split("&since=")[0], [])  # noqa: E731
+        code, text = privacy.sweep(names, self.pub, api)
+        self.assertEqual(code, 0, text)
+        self.assertIn("Privacy sweep: passed", text)
+        github["repos/o/r/issues?state=all&per_page=100"] = [
+            {"number": 5, "title": "Faster", "body": "for Globex", "pull_request": {"url": "u"}, "updated_at": "9999"}]
+        github["repos/o/r/pulls/5/reviews?per_page=100"] = [{"body": "Acme Corp would like it", "id": 2}]
+        github["repos/o/r/issues/comments?per_page=100"] = [{"body": "globex", "html_url": "https://x/c1"}]
+        self.commit("c.txt", "one\nfor acme corp\n", "Add c")
+        code, text = privacy.sweep(names, self.pub, api)
+        self.assertEqual(code, 1)
+        for where in ("c.txt line 2", "PR #5's description, line 1", "a review on PR #5 (2)", "a comment (https://x/c1)"):
+            self.assertIn(where, text)
+        self.assertNotIn("lobex", text)
+        self.assertNotIn("cme", text)
+        self.assertEqual(privacy.sweep({}, self.pub, api)[0], 0)  # no list on this repo: not checked
+        self.assertEqual(privacy.sweep({privacy.FINGERPRINT: "s$h"}, self.pub, api)[0], 1)  # the list went missing
+
+    def test_the_fingerprint_names_the_list_never_the_names(self):
+        value = privacy.fingerprint(["Globex", "Acme Corp"])
+        self.assertNotIn("lobex", value.lower())
+        self.assertTrue(privacy.matches(["acme corp", "GLOBEX"], value))  # order and case don't count
+        self.assertFalse(privacy.matches(["Globex"], value))
+        self.assertFalse(privacy.matches(["Globex", "Acme Corp"], ""))
+        self.assertNotEqual(privacy.fingerprint(["Globex"]), privacy.fingerprint(["Globex"]))  # a fresh salt each time
+        same = upkeep.fingerprint_check("kit", "o/r", ["Globex", "Acme Corp"], lambda repo: value)
+        self.assertNotIn("warn", same[0])
+        changed = upkeep.fingerprint_check("kit", "o/r", ["Globex", "Initech"], lambda repo: value)[0]
+        self.assertTrue(changed["warn"])
+        self.assertIn("no longer matches", changed["check"])
+        self.assertIn("nh privacy secret o/r", changed["check"])
+        self.assertIn("no fingerprint", upkeep.fingerprint_check("kit", "o/r", ["Globex"], lambda repo: "")[0]["check"])
 
 
 class Forwarding(unittest.TestCase):
@@ -181,10 +230,6 @@ class Forwarding(unittest.TestCase):
                               env=env)
         self.assertEqual(done.returncode, 0, done.stderr)  # ran here: setup makes this checkout the kit
         self.assertNotIn("NEW", done.stdout)
-        old = env | {"WORKKIT_SETTINGS": str(s)}  # the settings variable before 1.56.0 still counts
-        old.pop("NH_SETTINGS")
-        self.assertEqual(subprocess.run(["sh", str(KIT / "bin" / "nh"), "version"], capture_output=True,
-                                        text=True, env=old).returncode, 7)
         s.write_text('owner = "x"\n', encoding="utf-8")  # no kit named: it runs here
         for launcher in ("nh", "wk"):
             done = subprocess.run(["sh", str(KIT / "bin" / launcher), "version"], capture_output=True, text=True,

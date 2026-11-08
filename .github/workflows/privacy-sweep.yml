@@ -1,0 +1,34 @@
+# The daily privacy sweep: every tracked file, the last days' commits on main, and open and recent issues, PRs,
+# comments and reviews, checked against the PRIVATE_TERMS secret, so text that reached GitHub another way (a web
+# edit, an issue, another laptop) is found too. A hit fails the run (GitHub then emails the repo's admins), naming
+# only where, never the name. Once a day, a minute or two; it can also be run by hand (Actions, Run workflow).
+name: privacy sweep
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+concurrency:
+  group: privacy-sweep
+  cancel-in-progress: true
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: No private names in the repo or its GitHub text
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+          PRIVATE_TERMS_FINGERPRINT: ${{ vars.PRIVATE_TERMS_FINGERPRINT }}
+          GH_TOKEN: ${{ github.token }}
+        run: python -m wk privacy sweep

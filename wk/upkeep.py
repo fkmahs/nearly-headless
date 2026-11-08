@@ -1,17 +1,18 @@
 """Setup, update and doctor: keeping a laptop's nearly-headless current, like any SaaS product.
 
 setup   writes this laptop's settings file (if it has none; else adds any --repo it lacks), and the WWID profile repo
-        (`wwid_profile`) when --profile names it or a `wwid` checkout sits beside nearly-headless; then installs the skills and the owner's expectations
-        (AGENTS.md) for every coding agent on the laptop: Claude always, Codex when it is installed; and Claude's
+        (`wwid_profile`) when --profile names it or a `wwid` checkout sits beside nearly-headless; then installs the skills and the instructions every chat
+        reads (the file `instructions` names in the settings, else the kit's neutral default) for every coding agent on
+        the laptop: Claude always, Codex when it is installed; and Claude's
         hook that gives a supervisor its list when a chat starts or resumes and after its memory is compacted or cleared
         (`nh recall`), the hook
         that holds a supervisor's reply to the format (`nh reply-check`, off until the settings file lists the parts)
         and the one that names those parts before each turn (`nh reply-check --remind`),
         and an earlier auto-compact window, so long chats re-read less each turn; and, in every repo it lists, git's
-        local exclude list of files that never go to GitHub (keepout.py)
+        local exclude list of files that never go to GitHub (keepout.py), and its separate list checkout's
 update  moves this nearly-headless checkout to the newest release on GitHub, then lets that release install itself
 auto    once a day, any nh command checks GitHub and updates on its own, so nobody has to remember
-doctor  checks the settings, every repo, the skills, the expectations and CI against what nearly-headless expects
+doctor  checks the settings, every repo, the skills, the instructions and CI against what nearly-headless expects
 """
 
 from __future__ import annotations
@@ -31,9 +32,11 @@ from .core import KitError
 
 KIT = Path(__file__).resolve().parents[1]
 
-MARK = "<!-- nearly-headless: the owner's expectations for every chat. Edit AGENTS.md in nearly-headless; nh keeps this copy current. -->"
-OURS = ("<!-- nearly-headless:", "<!-- work-kit:")  # how a file the kit wrote is recognised: this mark, or the one
-# releases before 1.56.0 wrote, so an old copy is replaced, never kept beside a new one
+OURS = "<!-- nearly-headless:"  # how an instructions file the kit wrote starts, so it is replaced, never doubled
+MARK = OURS + " the owner's expectations for every chat. Edit AGENTS.md in nearly-headless; nh keeps this copy current. -->"
+DEFAULT_MARK = (OURS + " the kit's default instructions for every chat. To use your own, set `instructions` in the "
+                "settings file to your file; nh keeps this copy current. -->")
+DEFAULT_INSTRUCTIONS = KIT / "templates" / "instructions.md"  # neutral: a new laptop's chats get these until replaced
 
 
 # ---------------------------------------------------------------- where each agent reads its instructions and skills
@@ -68,27 +71,68 @@ def agents() -> list[dict]:
 COMPACT = KIT / "templates" / "compact-instructions.md"  # what Claude keeps when it compacts a chat
 
 
-def _expectations(agent: str = "Claude") -> str:
-    """The owner's expectations; Claude's copy also carries the compact instructions, which Claude reads from
-    CLAUDE.md under a "# Compact instructions" heading."""
-    text = MARK + "\n\n" + (KIT / "AGENTS.md").read_text(encoding="utf-8")
+def _current(s: dict | None) -> dict:
+    return settings.load(settings.path()) if s is None else s
+
+
+def instructions_source(s: dict | None = None) -> Path:
+    """The file every chat's instructions come from: `instructions` in the settings, else the neutral default."""
+    return settings.instructions(_current(s)) or DEFAULT_INSTRUCTIONS
+
+
+def _mark(src: Path) -> str:
+    if core.same_path(src, DEFAULT_INSTRUCTIONS):
+        return DEFAULT_MARK
+    if any(core.same_path(src, k / "AGENTS.md") for k in (KIT, installed_kit())):
+        return MARK
+    return f"{OURS} your instructions for every chat. Edit {core.posix(src)}; nh keeps this copy current. -->"
+
+
+def _expectations(agent: str = "Claude", s: dict | None = None) -> str:
+    """The instructions every chat reads, marked as the kit's copy; Claude's copy also carries the compact
+    instructions, which Claude reads from CLAUDE.md under a "# Compact instructions" heading. KitError when the
+    source file can't be read."""
+    src = instructions_source(s)
+    try:
+        body = src.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise KitError(f"the instructions file {core.posix(src)} can't be read ({exc}); fix `instructions` in the "
+                       "settings file") from exc
+    text = _mark(src) + "\n\n" + body
     return text + "\n" + COMPACT.read_text(encoding="utf-8") if agent == "Claude" else text
 
 
-def install_expectations() -> dict:
-    """Put the kit's AGENTS.md in each agent's own instructions file, which every chat reads in every repo. A file
-    nearly-headless did not write is never overwritten: it only needs one line that pulls the expectations in."""
-    done = {}
+def install_expectations(s: dict | None = None) -> dict:
+    """Put the instructions (instructions_source) in each agent's own instructions file, which every chat reads in
+    every repo. A file nearly-headless did not write is never overwritten: it only needs one line that pulls them in."""
+    done, src = {}, instructions_source(s)
     for a in agents():
         dest = a["instructions"]
         if dest.is_file() and not dest.read_text(encoding="utf-8").startswith(OURS):
             done[a["agent"]] = {"installed": False, "file": core.posix(dest),
-                                "why": f"it holds your own instructions; add the line @{core.posix(KIT / 'AGENTS.md')}"
+                                "why": f"it holds your own instructions; add the line @{core.posix(src)}"
                                        + (f" and the section in {core.posix(COMPACT)}" if a["agent"] == "Claude" else "")}
             continue
-        core.atomic_text(dest, _expectations(a["agent"]))
+        try:
+            core.atomic_text(dest, _expectations(a["agent"], s))
+        except KitError as exc:
+            done[a["agent"]] = {"installed": False, "file": core.posix(dest), "why": str(exc)}
+            continue
         done[a["agent"]] = {"installed": True, "file": core.posix(dest)}
     return done
+
+
+def keep_instructions(where: Path, created: bool) -> dict:
+    """A laptop already running the kit's AGENTS.md as every chat's instructions (its CLAUDE.md carries that mark)
+    keeps them: setup records `instructions` pointing at it, once. A new laptop gets the neutral default."""
+    s = settings.load(where)
+    mine = claude_dir() / "CLAUDE.md"
+    if created or settings.instructions(s) is not None or not mine.is_file() \
+            or not mine.read_text(encoding="utf-8").startswith(MARK):
+        return {"instructions": core.posix(instructions_source(s)), "changed": False}
+    mine = core.posix(installed_kit() / "AGENTS.md")  # the laptop's kit, as `kit` is: never a builder's worktree
+    _top_level(where, "instructions", mine, keep=True)
+    return {"instructions": mine, "changed": True}
 
 
 def skill_files(skill: Path) -> list[Path]:
@@ -176,7 +220,7 @@ def install_hook(spec: tuple = RECALL) -> dict:
     try:
         data, groups = _hook_groups(path, spec)
     except KitError as exc:
-        return {"installed": False, "file": core.posix(path), "why": f"{exc}; add the hook by hand (docs/new-laptop.md)"}
+        return {"installed": False, "file": core.posix(path), "why": f"{exc}; add the hook by hand (docs/install.md)"}
     if _has_hook(groups, spec):
         return {"installed": True, "changed": False, "file": core.posix(path)}
     kept = []
@@ -310,13 +354,18 @@ def add_repos(where: Path, repos: list[str]) -> dict:
 
 
 def install_keepout(s: dict) -> dict:
-    """Each listed repo's local git exclude file gets the kit's block of files that never go to GitHub."""
+    """Each listed repo's local git exclude file gets the kit's block of files that never go to GitHub, and so does
+    the checkout holding its list when that is a separate one (`list` in its settings entry)."""
     done = {}
     for name in s.get("repos") or {}:
         try:
-            done[name] = keepout.install(settings.repo(s, name))
+            top = settings.repo(s, name)
+            done[name] = keepout.install(top)
+            lst = settings.list_of(s, name)
+            if not core.same_path(core.git_common_dir(lst), core.git_common_dir(top)):
+                done[name] = done[name] | {"list": keepout.install(lst)}
         except (KitError, OSError) as exc:
-            done[name] = {"installed": False, "why": str(exc)}
+            done[name] = {"installed": False} | done.get(name, {}) | {"why": str(exc)}
     return done
 
 
@@ -408,12 +457,11 @@ def install_guard(s: dict) -> dict:
 
 
 WWID_MARK = "What would I do"  # the wwid skill's heading, which the reply check requires on a laptop with a WWID profile
-_OLD_MARK = re.compile(r"what would .+ do", re.IGNORECASE)  # this one, or an earlier one naming the owner
 
 
 def sync_mark(where: Path) -> dict:
-    """The reply check's WWID mark follows the profile: with `wwid_profile` set, `[reply] require` holds WWID_MARK (in place
-    of an earlier "What would <name> do"); without it, no such mark. Other parts and lines stay as they are; a file
+    """The reply check's WWID mark follows the profile: with `wwid_profile` set, `[reply] require` holds WWID_MARK;
+    without it, no such mark. Other parts and lines stay as they are; a file
     the change can't be made to safely is left alone and says why."""
     text = where.read_text(encoding="utf-8")
     s = tomllib.loads(text)
@@ -421,12 +469,7 @@ def sync_mark(where: Path) -> dict:
     reply = s.get("reply")
     marks = reply.get("require") if isinstance(reply, dict) else None
     marks = marks if isinstance(marks, list) else []
-    want = []
-    for m in marks:  # WWID_MARK takes the first old mark's place; any other old one goes
-        if not (isinstance(m, str) and _OLD_MARK.fullmatch(m.strip())):
-            want.append(m)
-        elif on and WWID_MARK not in want:
-            want.append(WWID_MARK)
+    want = [m for m in marks if on or not (isinstance(m, str) and m.strip() == WWID_MARK)]
     if on and WWID_MARK not in want:
         want.append(WWID_MARK)
     if want == marks:
@@ -462,14 +505,9 @@ def sync_mark(where: Path) -> dict:
 
 def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | None = None, profile: str = "") -> dict:
     """repos are name=path pairs. An existing settings file is never overwritten: repos it lacks are added at its end,
-    and the WWID profile repo when it has none (add_profile). The settings folder from before 1.56.0 (~/.workkit)
-    moves to ~/.nearly-headless first, once, when `where` is the default file (move_home)."""
+    and the WWID profile repo when it has none (add_profile)."""
     if profile and not Path(profile).is_dir():
         raise KitError(f"--profile {profile}: no such folder; clone the profile repo there first")
-    moved = {"moved": False}
-    if any(core.same_path(where, h / "settings.toml") for h in (settings.home(), settings.old_home())):
-        moved = settings.move_home()
-        where = settings.path()
     created, repos_done = False, None
     if not where.is_file():
         if not owner:
@@ -481,12 +519,13 @@ def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | No
         created = True
     elif repos:
         repos_done = add_repos(where, repos)
-    return {"settings": core.posix(where), "created": created, "settings_moved": moved,
+    kept = keep_instructions(where, created)
+    return {"settings": core.posix(where), "created": created, "instructions": kept,
             **({"repos": repos_done} if repos_done is not None else {}), "wwid_profile": add_profile(where, profile),
             "kit": add_kit(where), "pr_sections": add_sections_from(where),
             "reply_mark": sync_mark(where),
             "skills": install_skills(skills),
-            "expectations": install_expectations(), "hook": install_hook(), "clear_hook": install_hook(RECALL_CLEAR),
+            "expectations": install_expectations(settings.load(where)), "hook": install_hook(), "clear_hook": install_hook(RECALL_CLEAR),
             "start_hook": install_hook(RECALL_START), "resume_hook": install_hook(RECALL_RESUME), "reply_hook": install_hook(REPLY),
             "remind_hook": install_hook(REMIND), "push": install_push(), "compact_window": install_window(),
             "keep_out": install_keepout(settings.load(where)), "privacy_guard": install_guard(settings.load(where)),
@@ -570,7 +609,7 @@ def auto_update(where: Path, s: dict, today: str = "") -> dict | None:
     and tried again: on the next command when the check itself failed (the day is stamped only once GitHub answered),
     else the next day. It updates the laptop's kit (installed_kit), wherever it is run from. Off with
     `auto_update = false` in the settings file."""
-    if s.get("auto_update") is False or "0" in (os.environ.get("NH_AUTO_UPDATE"), os.environ.get("WORKKIT_AUTO_UPDATE")):
+    if s.get("auto_update") is False or os.environ.get("NH_AUTO_UPDATE") == "0":
         return None
     stamp, today = where.parent / ".nearly-headless-checked", today or date.today().isoformat()
     if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == today:
@@ -602,13 +641,16 @@ def skill_checks() -> list[dict]:
     return found
 
 
-def expectations_check() -> list[dict]:
-    found = []
+def expectations_check(s: dict | None = None) -> list[dict]:
+    found, src = [], instructions_source(s)
     for a in agents():
         dest = a["instructions"]
         text = dest.read_text(encoding="utf-8") if dest.is_file() else ""
-        ok = text == _expectations(a["agent"]) or f"@{core.posix(KIT / 'AGENTS.md')}" in text
-        found.append({"ok": ok, "check": f"{a['agent']}: your expectations (nearly-headless AGENTS.md) reach every chat"})
+        try:
+            ok = text == _expectations(a["agent"], s) or f"@{core.posix(src)}" in text
+        except KitError:
+            ok = False
+        found.append({"ok": ok, "check": f"{a['agent']}: your instructions ({core.posix(src)}) reach every chat"})
     return found
 
 
@@ -675,10 +717,10 @@ def window_check() -> list[dict]:
     return [{"ok": True, "check": what + (" (your choice)" if value != WINDOW_DEFAULT else "")}]
 
 
-def kit_checks() -> list[dict]:
-    """What nearly-headless puts on the laptop: its skills, the owner's expectations, Claude's hooks, phone push and
-    compact window."""
-    return skill_checks() + expectations_check() + hook_check() + push_check() + window_check()
+def kit_checks(s: dict | None = None) -> list[dict]:
+    """What nearly-headless puts on the laptop: its skills, the instructions every chat reads, Claude's hooks, phone
+    push and compact window."""
+    return skill_checks() + expectations_check(s) + hook_check() + push_check() + window_check()
 
 
 def docker_check(platform: str = sys.platform, which=shutil.which, run=None) -> list[dict]:
@@ -697,7 +739,7 @@ def docker_check(platform: str = sys.platform, which=shutil.which, run=None) -> 
 
 def ran_from(s: dict, env: dict = os.environ) -> str:
     """Which nearly-headless checkout ran this command, and the forwarder it came through, if any."""
-    via = env.get("NH_FORWARDED") or env.get("WORKKIT_FORWARDED") or ""  # the second: a launcher before 1.56.0
+    via = env.get("NH_FORWARDED") or ""
     line = f"nearly-headless {__version__} ran from {core.posix(KIT)}"
     if via and not core.same_path(via, KIT):
         line += f" (forwarded by {core.posix(via)}/bin)"
@@ -707,15 +749,22 @@ def ran_from(s: dict, env: dict = os.environ) -> str:
     return line
 
 
-def home_check() -> list[dict]:
-    """One settings folder: with both ~/.workkit (before 1.56.0) and ~/.nearly-headless, which one the kit reads
-    depends on how it is run, so doctor fails and says which to keep."""
-    new, old = settings.home(), settings.old_home()
-    if not (new.exists() and old.exists()):
-        return []
-    return [{"ok": False, "check": f"two settings folders, {core.posix(new)} and {core.posix(old)} (fix: keep "
-                                   f"{core.posix(new)}, the one the kit reads; copy anything you still need from "
-                                   f"{core.posix(old)} into it, then delete {core.posix(old)})"}]
+def fingerprint_check(name: str, repo: str, names: list[str], recorded=None) -> list[dict]:
+    """A public repo's PRIVATE_TERMS secret matches this laptop's list: the fingerprint `nh privacy secret` recorded
+    there (never the names) against this list's. A warning, with the command that sets both again."""
+    value = (recorded or privacy.recorded)(repo)
+    fix = f"run `nh privacy secret {repo}`"
+    if value is None:
+        what = f"{name}: couldn't read whether {repo}'s private name list is current (gh variable get)"
+    elif not value:
+        what = (f"{name}: {repo}'s private name list has no fingerprint, so whether it matches this laptop's is "
+                f"unknown (fix: {fix})")
+    elif privacy.matches(names, value):
+        return [{"ok": True, "check": f"{name}: {repo}'s private name list (PRIVATE_TERMS) matches this laptop's"}]
+    else:
+        what = (f"{name}: this laptop's private name list no longer matches {repo}'s PRIVATE_TERMS, so GitHub's "
+                f"checks miss what changed (fix: {fix})")
+    return [{"ok": True, "warn": True, "check": what}]
 
 
 def path_command(folder: Path, platform: str = sys.platform) -> str:
@@ -745,7 +794,7 @@ def doctor(s: dict, where: Path) -> list[dict]:
         found.append({"ok": ok, "check": what})
 
     add(where.is_file(), f"settings file at {core.posix(where)}")
-    found += home_check() + path_check()
+    found += path_check()
     found.append({"ok": True, "check": ran_from(s)})
     add(bool(s.get("owner")), "owner named in settings (approvals need it)")
     try:
@@ -758,7 +807,7 @@ def doctor(s: dict, where: Path) -> list[dict]:
     except KitError as exc:
         add(False, str(exc))
     add(shutil.which("gh") is not None, "GitHub CLI (gh) installed")
-    found += kit_checks() + docker_check()
+    found += kit_checks(s) + docker_check()
     for name in s.get("repos") or {}:
         try:
             top = settings.repo(s, name)
@@ -776,6 +825,9 @@ def doctor(s: dict, where: Path) -> list[dict]:
         if settings.is_public((s.get("repos") or {})[name]):
             add(privacy.hook_installed(top), f"{name}: public: the privacy guard checks every push (pre-push hook; "
                 "nh setup adds it)")
+            repo = privacy.github_repo(top)
+            if repo:
+                found += fingerprint_check(name, repo, privacy.terms(s))
         try:
             lst = settings.list_of(s, name)
             if not core.same_path(lst, top):
