@@ -25,7 +25,7 @@ nearly-headless stays generic: no client names, tickets, billing figures or pers
 | `wk/privacy.py` | `python -m unittest tests.test_privacy tests.test_turns tests.test_upkeep` |
 | `bin/nh`, `bin/nh.cmd`, `bin/wk`, `bin/wk.cmd` (the launchers and their forwarding) | `python -m unittest tests.test_privacy tests.test_upkeep` |
 | `wk/testmap.py` | `python -m unittest tests.test_testmap tests.test_turns` |
-| `wk-test.Dockerfile` (the Linux image `nh test` runs in; a changed file builds a new one) | `python -m unittest tests.test_testmap tests.test_work` |
+| `wk-test.Dockerfile`, `wk/images/` (the Linux images `nh test` runs in; a changed file builds a new one) | `python -m unittest tests.test_testmap tests.test_work` |
 | `tests/test_<name>.py` | `python -m unittest tests.test_<name>` |
 | `toolkits/<kit>/` | `python -m unittest discover -s toolkits/<kit>/tests` |
 | `wk/__init__.py` (version only), `skills/`, `docs/`, `*.md`, `templates/pull_request_template.md`, `LICENSE` | none: read the diff |

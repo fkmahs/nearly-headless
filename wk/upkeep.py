@@ -26,7 +26,7 @@ import tomllib
 from datetime import date
 from pathlib import Path
 
-from . import __version__, core, guard, keepout, privacy, settings, turns
+from . import __version__, core, guard, keepout, privacy, settings, testmap, turns
 from .core import KitError
 
 KIT = Path(__file__).resolve().parents[1]
@@ -782,6 +782,9 @@ def doctor(s: dict, where: Path) -> list[dict]:
                 add((lst / ".git").exists(), f"{name}: its list is kept in {core.posix(lst)}")
         except KitError as exc:
             add(False, str(exc))
+        if not testmap.rows_of(top):
+            found.append({"ok": True, "warn": True, "check": f"{name}: no change → check map: nh test guesses; add one "
+                          f"(a `## Change → check` section in {' or '.join(testmap.MAPS)})"})
         expired = [t for t in turns.rows(top) if t["expired"]]
         add(not expired, f"{name}: no expired turns" + ("" if not expired else f" ({len(expired)} expired)"))
     return found

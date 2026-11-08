@@ -268,10 +268,11 @@ def parser() -> argparse.ArgumentParser:
                                     "4 = Docker needed; 5 = the Linux image didn't build)",
                        description="Reads the `## Change → check` map in AGENTS.md or CONTRIBUTING.md, matches every "
                                    "file this branch changed (committed or not) and runs each mapped command once. A "
-                                   "file no row names, or the full-run row, prints 'full run needed' and exits 1: wk "
-                                   "test never runs the whole suite unasked; CI does. On a laptop that isn't Linux, in "
-                                   "a repo with a wk-test.Dockerfile, the checks run only in a Linux container: Docker "
-                                   "off, wk starts Docker Desktop and waits; if it can't, nothing runs (exit 4), "
+                                   "file no row names, or the full-run row, prints 'full run needed' and exits 1: nh "
+                                   "test never runs the whole suite unasked; CI does. On a laptop that isn't Linux, the "
+                                   "checks run only in a Linux container (the repo's wk-test.Dockerfile, else the kit's "
+                                   "Node or Python image); CI-only map lines are skipped, laptop-only ones run here. Docker "
+                                   "off, nh starts Docker Desktop and waits; if it can't, nothing runs (exit 4), "
                                    "and an image that won't build runs nothing either (exit 5). "
                                    "--local runs them here.")
     s.add_argument("modules", nargs="*", help="run just these unittest modules (e.g. tests.test_work) instead")
