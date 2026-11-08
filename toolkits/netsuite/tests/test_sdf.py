@@ -643,7 +643,7 @@ class ReleaseAncestryTest(GitRepoTest):
         code, out, cli = self.run_main("deploy", "prod", "--pr", "17", "--dryrun", engine=engine)
         self.assertEqual(code, 1)
         self.assertIn("production runs releases this commit does not contain", out)
-        self.assertIn("nh gate release: wk: refused", out)
+        self.assertIn("nh gate release: nh: refused", out)
         cli.assert_not_called()
 
 
@@ -983,7 +983,7 @@ class ProdFromMainTest(GitRepoTest):
         engine = FakeEngine(refuse=[("gate", "approved")], pr=merged_pr(self.merge, self.pr_head))
         code, out, cli = self.deploy(engine, "--pr", "7")
         self.assertEqual(code, 2)
-        self.assertIn("nh gate approved --pr 7 --action deploy to production: wk: refused", out)
+        self.assertIn("nh gate approved --pr 7 --action deploy to production: nh: refused", out)
         cli.assert_not_called()
 
     def test_upload_asks_for_the_upload_approval(self):
