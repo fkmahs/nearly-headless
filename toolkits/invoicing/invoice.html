@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>$title</title>
+<style>
+  /* Layout follows the first invoice the owner sent by hand. */
+  @page { size: Letter; margin: 12mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 9pt; color: #1d2329; margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; }
+  .who h1 { font-size: 17pt; margin: 0 0 8px; letter-spacing: .5px; }
+  .who .name { font-weight: 700; }
+  .who div { line-height: 1.4; }
+  .meta { border-collapse: collapse; }
+  .meta td { padding: 1.5px 0 1.5px 18px; }
+  .meta td:first-child { color: #4b5560; }
+  .meta .strong { font-weight: 700; }
+  .billto { margin: 14px 0 12px; line-height: 1.4; }
+  .label { font-size: 8pt; text-transform: uppercase; letter-spacing: .6px; color: #6b7580; margin-bottom: 4px; }
+  table.lines { width: 100%; border-collapse: collapse; }
+  .lines th { text-align: left; font-weight: 700; border-bottom: 2px solid #1d2329; padding: 4px 6px; }
+  .lines td { padding: 3px 6px; vertical-align: top; border-bottom: 1px solid #e3e6e9; line-height: 1.35; }
+  .lines .num, .lines th.num { text-align: right; white-space: nowrap; }
+  .lines .ref { white-space: nowrap; width: 1%; }
+  .lines tr.group td { padding-top: 6px; border-bottom: 1px solid #c9ced3; background: #f4f6f7; }
+  .lines tr.subtotal td { font-weight: 700; border-bottom: 1px solid #c9ced3; }
+  .lines tr.total td { font-weight: 700; font-size: 10pt; border-top: 2px solid #1d2329; border-bottom: none; padding-top: 5px; }
+  .lines tr { page-break-inside: avoid; }
+  footer { margin-top: 12px; color: #1d2329; line-height: 1.4; page-break-inside: avoid; }
+  footer p { margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="who">
+    <h1>INVOICE</h1>
+    <div class="name">$name</div>
+    <div>$business</div>
+    <div>$from_lines</div>
+  </div>
+  <table class="meta">
+    <tr><td>Invoice #</td><td class="strong">$invoice_id</td></tr>
+    <tr><td>Invoice date</td><td>$invoice_date</td></tr>
+    <tr><td>Service period</td><td>$period</td></tr>
+    <tr><td>Terms</td><td>$terms</td></tr>
+    <tr><td>Due date</td><td class="strong">$due</td></tr>
+    <tr><td>Currency</td><td>$currency</td></tr>
+  </table>
+</header>
+<section class="billto">
+  <div class="label">Bill to</div>
+  $bill_to
+</section>
+<table class="lines">
+  <thead><tr><th>Ref</th><th>Description</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+$rows
+    <tr class="total"><td colspan="2">Total due ($currency)</td><td class="num">$total_hours</td><td></td><td class="num">$total</td></tr>
+  </tbody>
+</table>
+<footer>
+$notes
+</footer>
+</body>
+</html>

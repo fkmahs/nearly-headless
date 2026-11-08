@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run work-kit with this checkout first on the path. Git Bash on Windows has no working python3: use py there.
+# When this laptop's settings name another checkout as its kit (`kit = "..."`, written by wk setup), forward to it,
+# so `wk` from this folder on the PATH runs that one.
+KIT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -z "$WORKKIT_FORWARDED" ]; then
+  S="${WORKKIT_SETTINGS:-$HOME/.workkit/settings.toml}"
+  if [ -f "$S" ]; then
+    T="$(sed -n -e '/^[[:space:]]*\[/q' -e 's/^kit[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$S" | head -n 1)"
+    if [ -n "$T" ] && [ -f "$T/bin/wk" ] && [ "$(cd "$T" && pwd -P)" != "$(cd "$KIT" && pwd -P)" ]; then
+      WORKKIT_FORWARDED="$(cd "$KIT" && (pwd -W 2>/dev/null || pwd))"
+      export WORKKIT_FORWARDED
+      exec sh "$T/bin/wk" "$@"
+    fi
+  fi
+fi
+if python3 -c "" 2>/dev/null; then PY=python3; else PY=py; fi
+PYTHONPATH="$KIT${PYTHONPATH:+:$PYTHONPATH}" PYTHONIOENCODING=utf-8 exec "$PY" -P -m wk "$@"
