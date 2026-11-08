@@ -33,7 +33,7 @@ When a chat is waiting on one of these, WWID doesn't stop the chat. It tells the
    Keep it under about 120 words. Add no requirement the owner didn't give, and no long "have ready" lists. If the call is the responder's own idea (a new rule, a design choice), say it is a proposal for the owner to confirm.
 
    Write like a person: short, warm, plain. Don't use key/value blocks or field labels, don't write "as you asked", don't sign as the owner, and don't name "WWID" or "the bot".
-5. **Log it** on the ticket (`wk log`) as WWID's answer, with the reason. The ticket is the record of who decided what.
+5. **Log it** on the ticket (`nh log`) as WWID's answer, with the reason. The ticket is the record of who decided what.
 
 ## Stop rules (per chat)
 

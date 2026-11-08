@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -56,6 +57,18 @@ class Plan(unittest.TestCase):
         self.assertIn("wk/new.py is in no row of the map", p["full"][2])
         self.assertIn("python -m unittest tests.test_toolkits", p["commands"])  # its own row still runs
 
+    def test_ci_only_rows_are_skipped_and_laptop_only_rows_run_on_the_laptop(self):
+        rows = testmap.map_rows("## Change → check\n| Change | Check |\n|---|---|\n"
+                                "| `e2e/` | CI only: `npm run e2e` (needs a browser) |\n"
+                                "| `db/<name>.py` | laptop-only: `python -m unittest tests.test_<name>` (needs a database) |\n"
+                                "| `wk/work.py` | `python -m unittest tests.test_work` |\n")
+        self.assertEqual([r["kind"] for r in rows], ["ci", "laptop", "run"])
+        p = testmap.plan(["e2e/login.spec.js", "db/orders.py", "wk/work.py"], rows)
+        self.assertEqual(p["commands"], ["python -m unittest tests.test_work"])
+        self.assertEqual(p["laptop"], ["python -m unittest tests.test_orders"])
+        self.assertEqual(p["skipped"], ["skipped, CI runs it: CI only: `npm run e2e` (needs a browser)"])
+        self.assertEqual(p["full"], [])  # a CI-only file is mapped, not a full run
+
     def test_patterns(self):
         rx = testmap._regex
         self.assertTrue(rx("*.md").match("skills/a/SKILL.md"))
@@ -104,6 +117,9 @@ class Run(unittest.TestCase):
             with redirect_stdout(out), redirect_stderr(out):
                 code = cli.main(["--settings", str(settings), "--cwd", str(app), "test", *argv])
             return code, out.getvalue()
+        stack = mock.patch.object(testmap, "stack", return_value=None)  # here, not in Docker, on any laptop
+        stack.start()
+        self.addCleanup(stack.stop)
         code, out = wk("--plan")
         self.assertEqual(code, 0, out)
         self.assertIn("run: python -m unittest ok_check", out)
@@ -291,12 +307,87 @@ class Where(unittest.TestCase):
         self.assertNotIn(testmap.IMAGE_FAILED, (0, 1, 2, testmap.DOCKER_NEEDED))
         self.assertNotIn("run", [c[1] for c in docker.calls])  # no check ran, here or in a container
 
-    def test_no_dockerfile_runs_here(self):
+    def test_no_dockerfile_and_no_known_stack_runs_here(self):
         (self.top / testmap.DOCKERFILE).unlink()
         docker = FakeDocker(running=False)
         (tag, why), _ = self.where(docker)
-        self.assertEqual((tag, why), (None, f"nh test: running here: this repo has no {testmap.DOCKERFILE}"))
+        self.assertEqual((tag, why), (None, f"nh test: running here: this repo has no {testmap.DOCKERFILE} and isn't "
+                                            "Node or Python (the kit's default Linux images)"))
         self.assertEqual(docker.calls, [])
+
+    def test_the_stack_is_told_from_the_repos_files(self):
+        top = Path(tempfile.mkdtemp())
+        self.assertIsNone(testmap.stack(top))
+        (top / "tests").mkdir()
+        (top / "tests" / "test_a.py").write_text("", encoding="utf-8")
+        self.assertEqual(testmap.stack(top), "python")
+        (top / "package.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(testmap.stack(top), "node")  # Node first
+        for name in ("node", "python"):
+            self.assertTrue((testmap.IMAGES / f"{name}.Dockerfile").is_file())
+
+    def test_without_its_own_file_a_repo_runs_in_the_kits_image_for_its_stack(self):
+        (self.top / testmap.DOCKERFILE).unlink()
+        (self.top / "package.json").write_text("{}", encoding="utf-8")
+        docker = FakeDocker(image=False, tags=["wk-test-python:aaaaaaaaaaaa", "wk-test-node:bbbbbbbbbbbb"])
+        (tag, why), out = self.where(docker)
+        self.assertTrue(tag.startswith("wk-test-node:"))
+        self.assertIn("from the kit's default node image", why)
+        build = next(c for c in docker.calls if c[1] == "build")
+        self.assertEqual(Path(build[build.index("-f") + 1]), testmap.IMAGES / "node.Dockerfile")
+        self.assertEqual(docker.tags, ["wk-test-python:aaaaaaaaaaaa", tag])  # an older node image goes; python stays
+        (again, _), out = self.where(docker)  # cached: the second run builds nothing
+        self.assertEqual((again, out), (tag, ""))
+        (self.top / "package.json").unlink()
+        (self.top / "pyproject.toml").write_text("", encoding="utf-8")
+        docker.image = False
+        (py, why), _ = self.where(docker)
+        self.assertTrue(py.startswith("wk-test-python:"))
+        self.assertEqual(docker.tags, [tag, py])  # the stale python image goes, the node one stays
+
+    def test_the_repos_own_file_wins_over_the_kits_default(self):
+        (self.top / "package.json").write_text("{}", encoding="utf-8")
+        (tag, why), _ = self.where(FakeDocker(image=False))
+        self.assertTrue(tag.startswith("wk-test:"))
+        self.assertIn(f"from {testmap.DOCKERFILE}", why)
+
+    def test_laptop_only_checks_run_here_and_ci_only_ones_are_skipped(self):
+        sh(self.top, "init", "-q", "-b", "main")
+        sh(self.top, "config", "user.name", "t")
+        sh(self.top, "config", "user.email", "t@example.org")
+        (self.top / "CONTRIBUTING.md").write_text(
+            "## Change → check\n| Change | Check |\n|---|---|\n| `e2e/` | CI only: `npm run e2e` (needs a browser) |\n"
+            "| `db/` | laptop only: `python -m unittest tests.db` (needs a database) |\n"
+            "| `app/` | `python -m unittest tests.app` |\n", encoding="utf-8")
+        sh(self.top, "add", "-A")
+        sh(self.top, "commit", "-qm", "init")
+        sh(self.top, "update-ref", "refs/remotes/origin/main", "HEAD")
+        for f in ("e2e/a.js", "db/a.py", "app/a.py"):
+            (self.top / f).parent.mkdir(exist_ok=True)
+            (self.top / f).write_text("x", encoding="utf-8")
+        sh(self.top, "add", "-A")
+        boxed, here, real = [], [], (testmap.where, testmap.in_container, testmap.core.run)
+
+        def run(argv, *a, **k):
+            if argv[0] != "git":
+                here.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return real[2](argv, *a, **k)
+        testmap.where = lambda top, local: ("wk-test:abc", "nh test: running in Linux")
+        testmap.in_container = lambda tag, top, c, timeout: boxed.append(c) or subprocess.CompletedProcess(c, 0, "", "")
+        testmap.core.run = run
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                code, tail = testmap.run(self.top, {})
+        finally:
+            testmap.where, testmap.in_container, testmap.core.run = real
+        self.assertEqual((code, tail.strip()), (0, "nh test: passed"), out.getvalue())
+        self.assertEqual(boxed, ["python -m unittest tests.app"])
+        self.assertEqual([a[1:] for a in here], [["-m", "unittest", "tests.db"]])
+        self.assertIn("nh test: skipped, CI runs it: CI only: `npm run e2e` (needs a browser)", out.getvalue())
+        self.assertIn("(laptop only: here)", out.getvalue())
+        self.assertNotIn("npm", "".join(boxed) + str(here))
 
     def test_wk_test_stops_before_any_check_with_its_own_exit_code(self):
         sh(self.top, "init", "-q", "-b", "main")
