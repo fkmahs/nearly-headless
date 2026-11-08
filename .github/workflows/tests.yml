@@ -1,0 +1,78 @@
+# work-kit's own CI, from templates/tests.yml: PRs and pushes to main only, drafts skipped,
+# superseded runs cancelled, a time cap, and recording work (.work/) never runs CI.
+name: tests
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: [".work/**"]
+  push:
+    branches: [main]
+    paths-ignore: [".work/**"]
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests (kit and toolkits)
+        run: python -m unittest discover -s tests
+  windows:
+    # A smoke check, not the suite (Windows minutes cost double): wk loads through bin/wk.cmd, and the hooks run.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: wk loads through bin/wk.cmd, and the hooks exit 0
+        shell: cmd
+        run: |
+          call bin\wk.cmd --version || exit /b 1
+          > "%RUNNER_TEMP%\s.toml" echo owner = "CI"
+          echo {"session_id": "ci", "last_assistant_message": "done"} | bin\wk.cmd --settings "%RUNNER_TEMP%\s.toml" reply-check || exit /b 1
+          echo {"session_id": "ci"} | bin\wk.cmd --settings "%RUNNER_TEMP%\s.toml" recall || exit /b 1
+  macos:
+    # The same smoke check on macOS (PRs only): wk loads through bin/wk, and the hooks run.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: wk loads through bin/wk, and the hooks exit 0
+        run: |
+          sh bin/wk --version
+          echo 'owner = "CI"' > "$RUNNER_TEMP/s.toml"
+          echo '{"session_id": "ci", "last_assistant_message": "done"}' | sh bin/wk --settings "$RUNNER_TEMP/s.toml" reply-check
+          echo '{"session_id": "ci"}' | sh bin/wk --settings "$RUNNER_TEMP/s.toml" recall
+  privacy:
+    # No private name in the PR's title, description or commits, from the PRIVATE_TERMS secret; the name is never
+    # printed. A PR from a fork gets no secrets: then it says "not checked", and wk gate fresh checks it at merge.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: No private names in the PR's text
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+        run: python -m wk privacy pr
