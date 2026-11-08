@@ -13,7 +13,8 @@ else ~/.workkit/settings.toml). It is the only thing that differs between laptop
     path = "C:/Projects/app"   # its main checkout
     base = "main"              # default main
     list = "C:/Projects/app-list"  # optional: the checkout holding its list (.work/), when not this one
-    public = true              # optional: anyone can read it, so the privacy guard checks its pushes and PRs
+    public = true              # optional: anyone can read it, so the privacy guard checks its pushes and PRs,
+                               # and its approvals read "Approved by the owner: ..."
 
     [privacy]
     terms = ["Globex"]         # private names only the owner knows, added to the guard's list (privacy.py)
@@ -51,6 +52,12 @@ def approver(s: dict) -> str:
     if not name:
         raise WorkkitError("No approver: set `owner` (or `approver`) in this laptop's settings file")
     return name
+
+
+def approver_at(s: dict, checkout: Path) -> str:
+    """The approver as a PR comment names them in this checkout's repo: on a public repo "the owner", so no name
+    reaches anyone who reads it (and the privacy check passes); elsewhere approver(s)."""
+    return "the owner" if is_public(info_of(s, checkout)[1]) else approver(s)
 
 
 def builders_per_list(s: dict) -> int | None:

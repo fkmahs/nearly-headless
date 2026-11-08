@@ -343,6 +343,18 @@ class Turns(unittest.TestCase):
         pr["headRefOid"] = "f" * 40  # a later push voids the approval
         self.assertEqual(self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "deploy to production")[0], 1)
 
+        # a public repo: the approval names no one, so the owner's name never reaches its readers
+        self.settings.write_text(f'owner = "Pat"\n\n[repos.app]\npath = "{core.posix(self.app)}"\npublic = true\n',
+                                 encoding="utf-8")
+        pr["comments"].append({"body": f"Approved by Pat: merge @ {pr['headRefOid']}", "url": "u-pat"})
+        code, out = self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "merge")
+        self.assertEqual(code, 1)
+        self.assertIn("'Approved by the owner: merge @ ffffffffffff'", out)
+        pr["comments"].append({"body": f"Approved by the owner: merge @ {pr['headRefOid'][:7]}", "url": "u-owner"})
+        code, out = self.wk(self.app, "gate", "approved", "--pr", "7", "--action", "merge")
+        self.assertEqual(code, 0)
+        self.assertIn("u-owner", out)
+
     def test_gate_fresh_waits_only_for_main_changes_to_the_prs_own_files(self):
         def commit(where, name, text, push=False):
             (where / name).write_text(text, encoding="utf-8")

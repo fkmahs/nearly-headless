@@ -224,8 +224,9 @@ def _norm(text: str) -> str:
 
 def gate_approved(cwd: Path, s: dict, pr: int, action: str) -> dict:
     """Exit 0 only when a PR comment has the line 'Approved by <approver>: <action> @ <sha>' and <sha> (7+ characters)
-    is the PR's current head commit, so an approval covers exactly the code it names."""
-    name = settings.approver(s)
+    is the PR's current head commit, so an approval covers exactly the code it names. On a public repo the line reads
+    'Approved by the owner: ...', so no name is on it."""
+    name = settings.approver_at(s, cwd)
     data = json.loads(_gh(cwd, "pr", "view", str(pr), "--json", "comments,headRefOid,url") or "{}")
     head = (data.get("headRefOid") or "").lower()
     line = re.compile(rf"^\s*approved by {re.escape(name)}\s*:\s*(.+?)\s*@\s*([0-9a-f]{{7,40}})\s*$", re.I | re.M)

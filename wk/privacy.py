@@ -193,7 +193,7 @@ def hook_path(top: Path) -> Path:
 
 def hook_text(launcher: Path) -> str:
     return (f"#!/bin/sh\n{HOOK_MARK}: a push that would publish a private name stops here (wk setup keeps this "
-            f"file).\nexec \"{core.posix(launcher)}\" privacy push \"$@\"\n")
+            f"file).\nexec sh \"{core.posix(launcher)}\" privacy push \"$@\"\n")  # sh: bin/wk needs no exec bit
 
 
 def install_hook(top: Path, launcher: Path) -> dict:
@@ -230,7 +230,8 @@ def tree(top: Path, out: Path, ref: str = "origin/main") -> dict:
     if out.exists() and any(out.iterdir()):
         raise WorkkitError(f"{core.posix(out)} is not empty; give a new folder")
     try:
-        done = subprocess.run(["git", "-C", str(top), "archive", "--format=tar", ref], capture_output=True, timeout=120)
+        done = subprocess.run(["git", "-C", str(top), "-c", "core.autocrlf=false", "archive", "--format=tar", ref],
+                              capture_output=True, timeout=120)  # the repo's own bytes, not this laptop's line endings
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WorkkitError(f"git archive {ref}: {exc}") from exc
     if done.returncode:
