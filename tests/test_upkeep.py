@@ -111,6 +111,15 @@ class Upkeep(unittest.TestCase):
         problems = {i["problem"] for i in guard.check(self.app)}
         self.assertTrue({"runs on pushes to every branch", "runs on a schedule", "no timeout-minutes",
                          "pushes that only record work (.work/) run CI"} <= problems)
+        daily = ("on:\n  schedule:\n    - cron: \"17 5 * * *\"\nconcurrency:\n  group: s\njobs:\n  s:\n"
+                 "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n")
+        (self.app / ".github" / "workflows" / "ci.yml").write_text(daily, encoding="utf-8")
+        self.assertNotIn("runs on a schedule", {i["problem"] for i in guard.check(self.app)})  # once a day, capped
+        for costly in (daily.replace("17 5", "*/10 *"), daily.replace("timeout-minutes: 5", "timeout-minutes: 30"),
+                       daily.replace("    timeout-minutes: 5\n", "")):
+            (self.app / ".github" / "workflows" / "ci.yml").write_text(costly, encoding="utf-8")
+            self.assertIn("runs on a schedule", {i["problem"] for i in guard.check(self.app)})
+        self.assertFalse([i for i in guard.check(KIT) if i["workflow"] == "privacy-sweep.yml"])
 
     def test_setup_writes_settings_once_and_installs_skills(self):
         result = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
@@ -153,10 +162,15 @@ class Upkeep(unittest.TestCase):
         exclude.write_text(text.replace("*.zip\n", "") + "mine-too/\n", encoding="utf-8")  # an older release's block
         upkeep.setup(self.settings, skills=self.skills)
         self.assertEqual(exclude.read_text(encoding="utf-8"), text + "mine-too/\n")  # refreshed in place, once
-        old = text.replace(keepout.START, "# work-kit: files that never go to GitHub. wk setup keeps this block.")
-        exclude.write_text(old.replace(keepout.END, "# end of work-kit's block"), encoding="utf-8")
-        upkeep.setup(self.settings, skills=self.skills)  # the block as releases before 1.56.0 wrote it
-        self.assertEqual(exclude.read_text(encoding="utf-8"), text)  # replaced, never doubled
+        lst = self.tmp / "app-list"  # the list kept in a checkout of its own gets the block as well
+        subprocess.run(["git", "init", "-q", "-b", "main", str(lst)], check=True, capture_output=True)
+        self.settings.write_text(f'owner = "Pat Lee"\n\n[repos.app]\npath = "{core.posix(self.app)}"\n'
+                                 f'list = "{core.posix(lst)}"\n', encoding="utf-8")
+        done = upkeep.setup(self.settings, skills=self.skills)["keep_out"]["app"]
+        self.assertTrue(done["list"]["changed"])
+        self.assertIn(keepout.START, (lst / ".git" / "info" / "exclude").read_text(encoding="utf-8"))
+        self.assertFalse(upkeep.setup(self.settings, skills=self.skills)["keep_out"]["app"]["list"]["changed"])
+        self.assertEqual(exclude.read_text(encoding="utf-8"), text + "mine-too/\n")
         self.assertTrue(doctor_ok())
         self.assertEqual(status(self.app), "")  # nothing committed or changed in the repo itself
         # an invoice statement still commits the way the invoicing toolkit does it (git add -- . in billing/): the
@@ -191,10 +205,11 @@ class Upkeep(unittest.TestCase):
         result = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         self.assertTrue(result["expectations"]["Claude"]["installed"])
         self.assertNotIn("Codex", result["expectations"])  # Codex is not on this test laptop
+        self.assertFalse(result["instructions"]["changed"])
         mine = (self.claude / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertTrue(mine.startswith(upkeep.MARK))
-        self.assertTrue(mine.startswith("<!-- nearly-headless: the owner's expectations"))  # the nearly-headless mark, not WWID's
-        self.assertIn((KIT / "AGENTS.md").read_text(encoding="utf-8"), mine)
+        self.assertTrue(mine.startswith(upkeep.DEFAULT_MARK))  # a new laptop: the neutral default
+        self.assertIn((KIT / "templates" / "instructions.md").read_text(encoding="utf-8"), mine)
+        self.assertNotIn((KIT / "AGENTS.md").read_text(encoding="utf-8"), mine)
         self.assertIn("\n# Compact instructions\n", mine)  # what Claude keeps when it compacts a chat
         for keep in ("open piece", "waiting on the owner", "agent id", "this turn", "Drop finished work"):
             self.assertIn(keep, mine)
@@ -207,43 +222,34 @@ class Upkeep(unittest.TestCase):
         self.assertEqual((self.claude / "CLAUDE.md").read_text(encoding="utf-8"), "My own rules\n")
         self.assertFalse(all(c["ok"] for c in upkeep.expectations_check()))
         with (self.claude / "CLAUDE.md").open("a", encoding="utf-8") as f:
-            f.write(f"@{core.posix(KIT / 'AGENTS.md')}\n")
+            f.write(f"@{core.posix(KIT / 'templates' / 'instructions.md')}\n")
         self.assertTrue(all(c["ok"] for c in upkeep.expectations_check()))
 
-    def test_expectations_an_older_release_wrote_are_replaced_not_doubled(self):
-        self.claude.mkdir(parents=True)
-        (self.claude / "CLAUDE.md").write_text("<!-- work-kit: the owner's expectations for every chat. -->\n\nOld rules\n",
-                                               encoding="utf-8")
-        self.assertTrue(upkeep.install_expectations()["Claude"]["installed"])
+    def test_your_own_instructions_file_and_a_laptop_already_on_the_kits_keeps_them(self):
+        own = self.tmp / "my-instructions.md"
+        own.write_text("# How I work\n- Short answers.\n", encoding="utf-8")
+        self.settings.write_text(f'owner = "Pat Lee"\ninstructions = "{core.posix(own)}"\n', encoding="utf-8")
+        upkeep.setup(self.settings, skills=self.skills)
         mine = (self.claude / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertEqual(mine, upkeep._expectations())
-        self.assertNotIn("Old rules", mine)
-        self.assertNotIn("work-kit:", mine)
-
-    def test_setup_moves_the_old_settings_folder_once_and_doctor_wants_one(self):
-        home = self.tmp / "home"
-        (home / ".workkit").mkdir(parents=True)
-        (home / ".workkit" / "settings.toml").write_text('owner = "Pat Lee"\n', encoding="utf-8")
-        (home / ".workkit" / "reply-check.log").write_text("x\n", encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if k not in ("NH_SETTINGS", "WORKKIT_SETTINGS")}
-        with mock.patch.object(Path, "home", lambda: home), mock.patch.dict(os.environ, env, clear=True):
-            self.assertEqual(settings.path(), home / ".workkit" / "settings.toml")  # read where it is until setup
-            done = upkeep.setup(settings.path(), skills=self.skills)
-            self.assertTrue(done["settings_moved"]["moved"])
-            self.assertFalse((home / ".workkit").exists())
-            self.assertEqual(sorted(p.name for p in (home / ".nearly-headless").iterdir()),
-                             ["reply-check.log", "settings.toml"])  # the whole folder
-            self.assertEqual(settings.path(), home / ".nearly-headless" / "settings.toml")
-            self.assertEqual(done["settings"], core.posix(home / ".nearly-headless" / "settings.toml"))
-            self.assertIn("kit = ", (home / ".nearly-headless" / "settings.toml").read_text(encoding="utf-8"))
-            self.assertEqual(upkeep.home_check(), [])
-            (home / ".workkit").mkdir()  # two live copies: nothing moves, doctor says which to keep
-            self.assertFalse(upkeep.setup(settings.path(), skills=self.skills)["settings_moved"]["moved"])
-            bad, = upkeep.home_check()
-            self.assertFalse(bad["ok"])
-            self.assertIn(f"keep {core.posix(home / '.nearly-headless')}", bad["check"])
-            with mock.patch.dict(os.environ, {"WORKKIT_SETTINGS": str(self.settings)}):
-                self.assertEqual(settings.path(), self.settings.resolve())  # the older variable still names it
+        self.assertTrue(mine.startswith(upkeep.OURS) and "- Short answers.\n" in mine)
+        self.assertTrue(all(c["ok"] for c in upkeep.expectations_check(settings.load(self.settings))))
+        own.unlink()  # a file that is gone: said so, and the copy there stays
+        done = upkeep.setup(self.settings, skills=self.skills)["expectations"]["Claude"]
+        self.assertFalse(done["installed"])
+        self.assertIn("can't be read", done["why"])
+        self.assertEqual((self.claude / "CLAUDE.md").read_text(encoding="utf-8"), mine)
+        # a laptop that ran the kit's AGENTS.md as its instructions: byte for byte the same after this release
+        before = (upkeep.MARK + "\n\n" + (KIT / "AGENTS.md").read_text(encoding="utf-8") + "\n"
+                  + upkeep.COMPACT.read_text(encoding="utf-8"))
+        (self.claude / "CLAUDE.md").write_text(before, encoding="utf-8")
+        self.settings.write_text('owner = "Pat Lee"\n\n[reply]\nrequire = []\n', encoding="utf-8")
+        done = upkeep.setup(self.settings, skills=self.skills)
+        self.assertTrue(done["instructions"]["changed"])
+        self.assertEqual((self.claude / "CLAUDE.md").read_text(encoding="utf-8"), before)
+        self.assertIn(f'instructions = "{core.posix(upkeep.installed_kit() / "AGENTS.md")}"\n',  # the laptop's kit
+                      self.settings.read_text(encoding="utf-8").split("[reply]")[0])  # once, above the first table
+        self.assertFalse(upkeep.setup(self.settings, skills=self.skills)["instructions"]["changed"])
+        self.assertEqual((self.claude / "CLAUDE.md").read_text(encoding="utf-8"), before)
 
     def test_doctor_checks_path_has_the_kits_launcher_and_gives_the_command(self):
         ok, = upkeep.path_check({"PATH": str(KIT / "bin")})
@@ -296,7 +302,8 @@ class Upkeep(unittest.TestCase):
             self.assertEqual(upkeep.auto_update(self.settings, s, "2026-10-28")["to"], "9.9.9")
             self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-10-28"))  # once a day
             self.assertEqual(calls, ["check", "update"])
-            upkeep.latest_version = lambda fetch=False, kit=None: calls.append("check") or upkeep.installed_version()
+            upkeep.latest_version = lambda fetch=False, kit=None: calls.append("check") or \
+                upkeep.installed_version(upkeep.installed_kit())  # the laptop's kit, which a worktree's may differ from
             self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-10-29"))  # already current
             self.assertIsNone(upkeep.auto_update(self.settings, s | {"auto_update": False}, "2026-10-30"))
             self.assertEqual(calls, ["check", "update", "check"])
@@ -735,10 +742,11 @@ class Upkeep(unittest.TestCase):
         prof.mkdir()
         on = f'owner = "Pat"\nwwid_profile = "{core.posix(prof)}"\n'
 
-        # this laptop as it is today: the old heading, which names the owner, becomes the new one, in its place
-        got, text = run(on + '\n[reply]  # mine\nrequire = ["What would Pat do", "Since you wrote:"]\nrecord = false\n')
+        got, text = run(on + '\n[reply]  # mine\nrequire = ["Since you wrote:"]\nrecord = false\n')
         self.assertTrue(got["changed"])
-        self.assertEqual(text, on + '\n[reply]  # mine\nrequire = ["What would I do", "Since you wrote:"]\nrecord = false\n')
+        self.assertEqual(reply.required(tomllib.loads(text)), ["Since you wrote:", "What would I do"])
+        self.assertIn("[reply]  # mine\n", text)
+        self.assertIs(tomllib.loads(text)["reply"]["record"], False)
         self.assertFalse(old.exists())
         self.assertTrue((mine / "SKILL.md").is_file() and (self.skills / "wwid" / "SKILL.md").is_file())
         self.assertFalse(run(text)[0]["changed"])  # once
@@ -753,10 +761,10 @@ class Upkeep(unittest.TestCase):
         self.assertEqual(tomllib.loads(text)["repos"], {"app": {"path": "C:/a"}})
 
         off = 'owner = "Pat"\n'  # no profile: no mark, and nothing added when there is none
-        got, text = run(off + '\n[reply]\nrequire = ["Since you wrote:", "What would Pat do"]\n')
+        got, text = run(off + '\n[reply]\nrequire = ["Since you wrote:", "What would I do"]\n')
         self.assertEqual(text, off + '\n[reply]\nrequire = ["Since you wrote:"]\n')
         self.assertEqual(run(off), ({"mark": False, "changed": False}, off))
-        got, text = run(off + 'reply = { require = ["What would Pat do"] }\n')  # a form setup won't edit
+        got, text = run(off + 'reply = { require = ["What would I do"] }\n')  # a form setup won't edit
         self.assertFalse(got["changed"])
         self.assertIn("by hand", got["why"])
 

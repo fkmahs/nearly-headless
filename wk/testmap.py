@@ -227,7 +227,7 @@ class ImageFailed(DockerNeeded):
 
 
 def install_line(platform: str = sys.platform) -> str:
-    """The new-laptop checklist's install line (docs/new-laptop.md)."""
+    """The install guide's line for Docker (docs/install.md)."""
     return "brew install --cask docker" if platform == "darwin" else "winget install Docker.DockerDesktop"
 
 

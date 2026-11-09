@@ -34,7 +34,6 @@ IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp")  # a flagged
 DOCS = "docs/"  # binaries here (design images) belong in GitHub
 START = "# nearly-headless: files that never go to GitHub. nh setup keeps this block; add your own lines outside it."
 END = "# end of the kit's block"
-OLD = ("# work-kit:", "# end of work-kit's block")  # the block as releases before 1.56.0 wrote it: replaced, never doubled
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree, to diff every file against
 
 
@@ -48,14 +47,14 @@ def _block() -> list[str]:
 
 
 def _with_block(text: str) -> str:
-    """The exclude file with the kit's block current: replaced where it is (from any release), else added at the
+    """The exclude file with the kit's block current: replaced where it is, else added at the
     end. A block is a start line and the first end line before the next start; a start with no end is left as it
     is, so a later run never swallows the owner's lines. Every other line stays as it was."""
     lines = text.splitlines()
-    starts = [i for i, x in enumerate(lines) if x.startswith(("# nearly-headless:", OLD[0]))]
+    starts = [i for i, x in enumerate(lines) if x.startswith("# nearly-headless:")]
     for n, start in enumerate(starts):
         stop = starts[n + 1] if n + 1 < len(starts) else len(lines)
-        end = next((i for i in range(start + 1, stop) if lines[i] in (END, OLD[1])), None)
+        end = next((i for i in range(start + 1, stop) if lines[i] == END), None)
         if end is not None:
             lines[start:end + 1] = _block()
             break

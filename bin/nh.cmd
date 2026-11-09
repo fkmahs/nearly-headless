@@ -5,9 +5,7 @@ rem When this laptop's settings name another checkout as its kit (kit = "...", w
 rem so nh from this folder on the PATH runs that one. nh setup never forwards: it makes this checkout the kit.
 setlocal
 set "WK_S=%NH_SETTINGS%"
-if not defined WK_S set "WK_S=%WORKKIT_SETTINGS%"
-if not defined WK_S if exist "%USERPROFILE%\.nearly-headless\" set "WK_S=%USERPROFILE%\.nearly-headless\settings.toml"
-if not defined WK_S set "WK_S=%USERPROFILE%\.workkit\settings.toml"
+if not defined WK_S set "WK_S=%USERPROFILE%\.nearly-headless\settings.toml"
 for %%k in ("%WK_S%") do set "WK_S=%%~fk"
 set "WK_T="
 set "WK_GO=1"

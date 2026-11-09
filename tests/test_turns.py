@@ -398,6 +398,46 @@ class Turns(unittest.TestCase):
         self.assertEqual(gate()[0], 1)
         self.assertEqual(self.wk(self.app, "gate", "fresh")[0], 2)  # needs --pr
 
+    def test_gate_fresh_refuses_a_public_pr_whose_commits_lines_or_reviews_hold_a_private_name(self):
+        self.settings.write_text(f'owner = "Pat Lee"\n\n[privacy]\nterms = ["Globex"]\n\n[repos.app]\n'
+                                 f'path = "{core.posix(self.app)}"\npublic = true\n', encoding="utf-8")
+        good = "## What was wrong\nx\n## What changed\ny\n## How it was tested\nz\n## What it means for you\nw"
+        pr = {"state": "OPEN", "headRefName": "feat-a", "baseRefName": "main", "title": "Faster list", "body": good,
+              "url": "https://github.com/acme/app/pull/7", "comments": [], "reviews": []}
+        line_comments = []
+        turns._gh = lambda cwd, *args: json.dumps(line_comments if args[0] == "api" else pr)
+
+        def commit(name, text, message):
+            (self.a / name).write_text(text, encoding="utf-8")
+            sh(self.a, "add", "-A")
+            sh(self.a, "commit", "-q", "-m", message)
+            return core.git(self.a, "rev-parse", "HEAD")
+
+        gate = lambda: self.wk(self.app, "gate", "fresh", "--pr", "7")  # noqa: E731
+        pr["headRefOid"] = commit("a.txt", "plain\n", "Add a")
+        code, out = gate()
+        self.assertEqual(code, 0, out)
+        pr["headRefOid"] = commit("b.txt", "plain\n", "Add b\n\nfor the Globex team")  # a commit message
+        code, out = gate()
+        self.assertEqual(code, 1)
+        self.assertIn("message, line 3", out)
+        self.assertNotIn("lobex", out)  # where, never the name
+        sh(self.a, "reset", "-q", "--hard", "HEAD~1")
+        pr["headRefOid"] = commit("b.txt", "one\nbuilt for globex\n", "Add b")  # a line it adds
+        code, out = gate()
+        self.assertEqual(code, 1)
+        self.assertIn("b.txt line 2", out)
+        pr["headRefOid"] = commit("b.txt", "one\n", "Reword b")  # taken out again: what the PR adds is clean
+        self.assertEqual(gate()[0], 0)
+        pr["reviews"] = [{"body": "Looks fine for GLOBEX"}]
+        self.assertIn("review 1", gate()[1])
+        pr["reviews"] = []
+        line_comments.append({"body": "ask globex", "path": "b.txt"})
+        code, out = gate()
+        self.assertEqual(code, 1)
+        self.assertIn("review comment 1 on b.txt", out)
+        self.assertNotIn("lobex", out)
+
     def test_a_yes_carries_over_only_clean_merges_of_main_with_ci_green(self):
         def commit(where, name, text, push=False):
             (where / name).write_text(text, encoding="utf-8")
