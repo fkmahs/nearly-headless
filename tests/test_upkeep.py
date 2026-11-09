@@ -38,9 +38,9 @@ def page_data(page: str) -> dict:
 
 
 def without_setup_lines(text: str) -> str:
-    """A settings file less the two top lines setup writes itself (`kit`, `pr_sections_from`)."""
+    """A settings file less the top lines setup writes itself (`kit`, `auto_update`, `pr_sections_from`)."""
     return "".join(line for line in text.splitlines(keepends=True)
-                   if not line.startswith(("kit = ", "pr_sections_from = ")))
+                   if not line.startswith(("kit = ", "auto_update = ", "pr_sections_from = ")))
 
 
 def sh(cwd, *args):
@@ -291,8 +291,9 @@ class Upkeep(unittest.TestCase):
         self.assertTrue(all(c["ok"] for c in upkeep.kit_checks()))
 
     def test_the_kit_updates_itself_once_a_day(self):
-        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
+        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills, auto=True)
         s = settings.load(self.settings)
+        self.assertIs(s["auto_update"], True)  # setup --auto-update
         calls, real = [], (upkeep.latest_version, upkeep.update, upkeep.fetched)
         upkeep.latest_version = lambda fetch=False, kit=None: calls.append("check") or "9.9.9"
         upkeep.update = lambda where, kit=None: calls.append("update") or {"from": "1.4.0", "to": "9.9.9"}
@@ -315,7 +316,7 @@ class Upkeep(unittest.TestCase):
             upkeep.latest_version, upkeep.update, upkeep.fetched = real
 
     def test_the_daily_check_stamps_the_day_only_once_github_answered(self):
-        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
+        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills, auto=True)
         s, stamp = settings.load(self.settings), self.settings.parent / ".nearly-headless-checked"
         real, answers = (upkeep.fetched, upkeep.latest_version, upkeep.update), ["git fetch failed: offline", ""]
         upkeep.fetched = lambda kit=None: answers.pop(0)
@@ -785,6 +786,7 @@ class Upkeep(unittest.TestCase):
             s = settings.load(self.settings)
             self.assertEqual(s["kit"], core.posix(upkeep.installed_kit()))  # setup's own two top lines
             self.assertRegex(s["pr_sections_from"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+            self.assertIs(s["auto_update"], True)  # a laptop set up before the setting existed keeps updating itself
             self.assertEqual(s["repos"]["new"], {"path": core.posix(new.resolve()), "client": "Beta"})
             self.assertEqual(s["repos"]["app"]["path"], "C:/Projects/app")
             again = upkeep.setup(self.settings, "", [f"new={new}"], self.skills)  # idempotent
@@ -830,8 +832,32 @@ class Upkeep(unittest.TestCase):
         upkeep.setup(self.settings, "", [f"My_repo-2={self.app}"], self.skills)  # letters, digits, - and _ are fine
         self.assertIn("My_repo-2", settings.load(self.settings)["repos"])
 
+    def test_a_new_laptop_updates_only_when_asked(self):
+        out = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)["auto_update"]
+        self.assertEqual((out["auto_update"], out["changed"]), (False, True))
+        self.assertIn("nh setup --auto-update", out["how"])
+        s = settings.load(self.settings)
+        calls, real = [], upkeep.fetched
+        upkeep.fetched = lambda kit=None: calls.append("fetch") or ""
+        os.environ.pop("NH_AUTO_UPDATE")
+        try:
+            self.assertIsNone(upkeep.auto_update(self.settings, s, "2026-11-09"))
+            self.assertIsNone(upkeep.auto_update(self.settings, {k: v for k, v in s.items() if k != "auto_update"},
+                                                 "2026-11-09"))  # not set: off too
+            self.assertEqual(calls, [])  # GitHub is never asked
+        finally:
+            os.environ["NH_AUTO_UPDATE"] = "0"
+            upkeep.fetched = real
+        again = upkeep.setup(self.settings, "", [], self.skills)["auto_update"]  # a second run keeps it off
+        self.assertEqual((again["auto_update"], again["changed"]), (False, False))
+        on = upkeep.setup(self.settings, "", [], self.skills, auto=True)["auto_update"]
+        self.assertEqual(on, {"auto_update": True, "changed": True})
+        self.assertIs(settings.load(self.settings)["auto_update"], True)
+        self.assertEqual(upkeep.setup(self.settings, "", [], self.skills)["auto_update"],
+                         {"auto_update": True, "changed": False})
+
     def test_the_daily_update_survives_any_failure(self):
-        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
+        upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills, auto=True)
         s, real = settings.load(self.settings), (upkeep.latest_version, upkeep.fetched)
         os.environ.pop("NH_AUTO_UPDATE")
         upkeep.fetched = lambda kit=None: ""
