@@ -743,6 +743,24 @@ def kit_checks(s: dict | None = None) -> list[dict]:
     return skill_checks() + expectations_check(s) + hook_check() + push_check() + window_check()
 
 
+def claude_found(which=shutil.which, home: Path | None = None, env: dict = os.environ) -> bool:
+    """Claude is on this laptop: the `claude` command, or the desktop app's own folder (Windows, macOS, Linux)."""
+    home = home or Path.home()
+    apps = [Path(env["APPDATA"]) / "Claude"] if env.get("APPDATA") else []
+    apps += [home / "Library" / "Application Support" / "Claude", home / ".config" / "Claude"]
+    return which("claude") is not None or any(a.is_dir() for a in apps)
+
+
+def claude_checks(found: list[dict], present: bool) -> list[dict]:
+    """Without Claude on the laptop, its lines say what setup installed for it, as warnings, never as ok: nothing
+    reads them yet."""
+    if present:
+        return found
+    note = [{"ok": True, "warn": True, "check": "Claude: not found on this laptop (no `claude` command or desktop "
+             "app): its skills, instructions and hooks are installed for when it is (docs/install.md, step 2)"}]
+    return note + [f | {"warn": True} if f["ok"] and f["check"].startswith("Claude:") else f for f in found]
+
+
 def docker_check(platform: str = sys.platform, which=shutil.which, run=None) -> list[dict]:
     """Off Linux, builders' tests run only in Docker's Linux container: missing or stopped Docker is a failure, with
     the fix. Linux needs no Docker for that."""
@@ -827,7 +845,7 @@ def doctor(s: dict, where: Path) -> list[dict]:
     except KitError as exc:
         add(False, str(exc))
     add(shutil.which("gh") is not None, "GitHub CLI (gh) installed")
-    found += kit_checks(s) + docker_check()
+    found += claude_checks(kit_checks(s), claude_found()) + docker_check()
     for name in s.get("repos") or {}:
         try:
             top = settings.repo(s, name)

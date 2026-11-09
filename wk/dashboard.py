@@ -375,7 +375,7 @@ def overview(s: dict, fetch: bool = False) -> dict:
     with ThreadPoolExecutor(max_workers=len(names) + 1) as pool:  # GitHub and git answer each repo in parallel
         kit_job = pool.submit(kit, fetch)
         repos = list(pool.map(lambda n: _repo(s, n, fetch), names))
-        k = kit_job.result()
+        k = kit_job.result() | {"auto": s.get("auto_update") is True}  # updates itself, or waits for nh update
     alerts = [a for r in repos for a in r["alerts"]]
     if k["behind"]:
         alerts.append(f"nearly-headless {k['latest']} is out (this laptop has {k['version']}): run nh update")

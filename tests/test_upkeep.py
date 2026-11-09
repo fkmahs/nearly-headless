@@ -1160,6 +1160,20 @@ class Upkeep(unittest.TestCase):
         os.utime(note, (now.timestamp() - 2 * 3600,) * 2)
         self.assertIsNone(dashboard.idle_hours(piece | {"note": str(note)}, "", now))  # the note was written 2h ago
 
+    def test_doctor_never_calls_claude_lines_ok_without_claude(self):
+        home, none = self.tmp / "home", lambda name: None
+        self.assertFalse(upkeep.claude_found(none, home, {}))
+        self.assertTrue(upkeep.claude_found(lambda name: "/usr/bin/claude" if name == "claude" else None, home, {}))
+        (home / ".config" / "Claude").mkdir(parents=True)  # the desktop app on Linux
+        self.assertTrue(upkeep.claude_found(none, home, {}))
+        lines = [{"ok": True, "check": "Claude: skill 'builder' installed and current"},
+                 {"ok": False, "check": "Claude: compacts long chats at 256,000 tokens at most"},
+                 {"ok": True, "check": "Codex: skill 'builder' installed and current"}]
+        self.assertEqual(upkeep.claude_checks(lines, True), lines)
+        got = upkeep.claude_checks(lines, False)
+        self.assertTrue(got[0]["warn"] and "not found" in got[0]["check"])
+        self.assertEqual([(g["ok"], g.get("warn", False)) for g in got[1:]], [(True, True), (False, False), (True, False)])
+
     def test_version(self):
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(io.StringIO()):

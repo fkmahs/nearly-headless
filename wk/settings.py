@@ -9,6 +9,7 @@
                                # for each coding agent; unset, it installs the kit's neutral default
 
     kit = "C:/Projects/nearly-headless"  # written by nh setup: the checkout `nh` runs (bin/nh elsewhere forwards)
+    auto_update = false        # written by nh setup: true (setup --auto-update) moves to each new release once a day
     pr_sections_from = "2026-01-01T00:00:00Z"  # written by nh setup: PRs opened since need the four sections
 
     [repos.app]                # every execution repo this laptop works on
