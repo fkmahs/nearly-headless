@@ -178,7 +178,8 @@ HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, REPLY)  # ev
 
 def hook_command(spec: tuple = RECALL) -> str:
     """The kit's own launcher by its absolute path, never through PATH, so a hook runs this checkout whatever PATH
-    holds. Claude Code runs hook commands in Git Bash on Windows, so the sh launcher works everywhere."""
+    holds. Claude Code runs hook commands in Git Bash on Windows, and directly on macOS and Linux, where bin/nh is
+    executable (git keeps its mode), so the sh launcher works everywhere."""
     return f'"{core.posix(KIT / "bin" / "nh")}" {spec[2]}'
 
 

@@ -1144,6 +1144,15 @@ class Upkeep(unittest.TestCase):
             cli.main(["--version"])
         self.assertEqual((done.exception.code, out.getvalue().strip()), (0, __version__))
 
+    def test_the_launchers_are_executable_in_git(self):
+        """macOS and Linux run bin/nh directly (the install guide, PATH and the hooks setup writes), so git must keep
+        it executable; through `sh` a missing mode goes unnoticed."""
+        run = subprocess.run(["git", "-C", str(KIT), "ls-files", "-s", "bin/nh", "bin/wk"], capture_output=True, text=True)
+        if run.returncode or not run.stdout.strip():
+            self.skipTest("not a git checkout here; CI checks it")
+        self.assertEqual({line.split()[3]: line.split()[0] for line in run.stdout.splitlines()},
+                         {"bin/nh": "100755", "bin/wk": "100755"})
+
     def test_a_file_error_is_a_plain_message(self):
         err = io.StringIO()
         real = upkeep.doctor
