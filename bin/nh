@@ -14,5 +14,9 @@ if [ -z "$NH_FORWARDED" ] && [ "$1" != "setup" ]; then
     fi
   fi
 fi
-if python3 -c "" 2>/dev/null; then PY=python3; else PY=py; fi
+# Python 3.11 or newer: python3, else a newer one installed beside an older system python3, else py (Windows).
+PY=py
+for C in python3 python3.13 python3.12 python3.11; do
+  if "$C" -c "import sys; sys.exit(sys.version_info < (3, 11))" >/dev/null 2>&1; then PY="$C"; break; fi
+done
 PYTHONPATH="$KIT${PYTHONPATH:+:$PYTHONPATH}" PYTHONIOENCODING=utf-8 exec "$PY" -P -m wk "$@"

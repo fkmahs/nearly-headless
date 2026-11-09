@@ -176,7 +176,7 @@ def laptop_settings(s: dict) -> list[dict]:
          "means": "How long a chat grows before Claude compacts it."},
         {"name": "Phone push", "value": {True: "On", False: "Off"}.get(push, str(push or "Not set")),
          "where": f"{upkeep.PUSH} in Claude's settings", "means": "Claude pushes to your phone when it needs you."},
-        {"name": "Updates itself", "value": "Off" if s.get("auto_update") is False else "Once a day",
+        {"name": "Updates itself", "value": "Once a day" if s.get("auto_update") is True else "Off",
          "where": "auto_update in the settings file", "means": "Moves this laptop to the newest release on its own."},
         {"name": "Repos", "value": str(len(s.get("repos") or {})), "where": "[repos] in the settings file",
          "means": "The repos this laptop works on."},

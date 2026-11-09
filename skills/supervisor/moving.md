@@ -1,6 +1,6 @@
 # Keeping work moving
 
-The owner's words: agents should not stop for him "unless they truly, truly need me". Work piles up while he sleeps or is away, so every question he didn't need to answer is hours lost.
+Agents stop for the owner only when they truly need them. Work piles up while the owner sleeps or is away, so every question they didn't need to answer is hours lost.
 
 ## Go ahead, or ask
 A step that is **reversible and inside the piece's agreed scope** goes ahead: do it, and report it in your next reply under **Done:** or **Started:** (or Still running), never as a question. For example:
@@ -11,7 +11,7 @@ A step that is **reversible and inside the piece's agreed scope** goes ahead: do
 - a design choice that can be undone before merge;
 - a rules or skill change that reaches the owner as a PR merge anyway.
 
-Always the owner's, however small: merges, deploys and live writes, deletions, credentials, hours, messages to anyone else, a change of scope, starting a piece that isn't in the queue he approved, and business choices that change how the client's staff work. Unsure whether a step can be undone, or is in scope? Then it is the owner's.
+Always the owner's, however small: merges, deploys and live writes, deletions, credentials, hours, messages to anyone else, a change of scope, starting a piece that isn't in the queue they approved, and business choices that change how the client's staff work. Unsure whether a step can be undone, or is in scope? Then it is the owner's.
 
 **On every start or resume**, after `nh check`, review your list's waiting questions (`nh question list <repo> <product>`). One you can now decide under this rule: withdraw it with `nh question withdraw <repo> <product> Q2 --reason "<what you decided and why it can be undone>"` (it leaves the list and the reason goes in its piece's note, marked as yours, never as the owner's answer; a whole-list question adds `--piece P3`, the piece whose note keeps it), act on it, and tell the owner in one line each under Done: or Started:.
 
@@ -21,7 +21,7 @@ Always the owner's, however small: merges, deploys and live writes, deletions, c
 ## The approved queue
 So that a merge waiting on the owner never stops the list, at a check-in the owner can approve an **ordered queue** of next pieces (the catch-up's order is a good start).
 - Each queued piece is a to-do with its **brief in its note** (`brief.md`) and the **files it will touch**: `nh piece set <repo> <product> P5 --files "wk/work.py,skills/" --after P3` (paths, folders ending in `/` or globs; `--files none` for work that touches no repo files; `--after`: the pieces whose merge it needs first).
-- Record the order he approved in one write: `nh piece queue <repo> <product> P5,P7,P2`, plus a note line on each ("<owner>: queued at the check-in"). `nh piece queue <repo> <product> none` empties it. Starting a piece takes it off the queue. He can reorder or drop any piece at any time: re-record it at once.
+- Record the order they approved in one write: `nh piece queue <repo> <product> P5,P7,P2`, plus a note line on each ("<owner>: queued at the check-in"). `nh piece queue <repo> <product> none` empties it. Starting a piece takes it off the queue. The owner can reorder or drop any piece at any time: re-record it at once.
 - **Whenever a builder hands back, a merge starts waiting, or you start or resume**, run `nh piece next <repo> <product>` and start, at once and in order, every piece it marks `start now`, each with its own brief (`brief.md`); report them under Started:. Nights count too: ask the app to keep the laptop awake while the queue has pieces.
 - It allows `builders_per_list` builders at a time per list (set in the laptop's settings; no limit when unset): a piece being built counts, one waiting on a merge doesn't. It holds back a piece whose files overlap an unmerged PR (any list's), a turn or a piece being built, or whose `--after` pieces haven't merged, and says why. Never start a held piece by hand; the reason shows in recall and the command center.
 - The queue only starts work. Merges, deploys and releases still wait for the owner's yes (`merge.md`).

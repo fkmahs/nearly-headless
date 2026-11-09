@@ -45,7 +45,8 @@ jobs:
           echo {"session_id": "ci", "last_assistant_message": "done"} | bin\nh.cmd --settings "%RUNNER_TEMP%\s.toml" reply-check || exit /b 1
           echo {"session_id": "ci"} | bin\nh.cmd --settings "%RUNNER_TEMP%\s.toml" recall || exit /b 1
   macos:
-    # The same smoke check on macOS (PRs only): nh loads through bin/nh, and the hooks run.
+    # The same smoke check on macOS (PRs only): nh loads through bin/nh run directly, as the hooks setup writes call it
+    # (never through sh, which would hide a launcher that isn't executable), and the hooks run.
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: macos-latest
     timeout-minutes: 5
@@ -55,11 +56,11 @@ jobs:
           persist-credentials: false
       - name: nh loads through bin/nh, and the hooks exit 0
         run: |
-          sh bin/nh --version
-          sh bin/wk --version
+          bin/nh --version
+          bin/wk --version
           echo 'owner = "CI"' > "$RUNNER_TEMP/s.toml"
-          echo '{"session_id": "ci", "last_assistant_message": "done"}' | sh bin/nh --settings "$RUNNER_TEMP/s.toml" reply-check
-          echo '{"session_id": "ci"}' | sh bin/nh --settings "$RUNNER_TEMP/s.toml" recall
+          echo '{"session_id": "ci", "last_assistant_message": "done"}' | bin/nh --settings "$RUNNER_TEMP/s.toml" reply-check
+          echo '{"session_id": "ci"}' | bin/nh --settings "$RUNNER_TEMP/s.toml" recall
   privacy:
     # No private name in the PR's title, description, branch, commit messages or the lines it adds, from the
     # PRIVATE_TERMS secret; the name is never printed. A PR from a fork gets no secrets: then it says "not checked",

@@ -14,10 +14,10 @@ Needs the owner's billing profile at `%USERPROFILE%/.wk/billing-profile.json` (o
 
 ## Friday
 
-The client's project manager runs it with the owner, in one pass: see the `project-manager` skill in the kit's `skills/`. In short: the week's finished work per list, the hours booked with the pieces they pay for, the owner's bill later or not billing choices, then `preview`, his yes, and `make`.
+The client's project manager runs it with the owner, in one pass: see the `project-manager` skill in the kit's `skills/`. In short: the week's finished work per list, the hours booked with the pieces they pay for, the owner's bill later or not billing choices, then `preview`, the owner's yes, and `make`.
 
 `py <nearly-headless>/toolkits/invoicing/invoice.py` with `<repo>`, the client repo holding `billing/`:
-- `preview <repo> --through <Friday>`: what the owner reads before his yes, as Markdown tables built from the records (hours and the pieces they name, bill marks, piece states and PRs), shown even when no hours are booked yet:
+- `preview <repo> --through <Friday>`: what the owner reads before their yes, as Markdown tables built from the records (hours and the pieces they name, bill marks, piece states and PRs), shown even when no hours are booked yet:
   - **Billed:** Area (list) | Exact line on the invoice | Pieces it pays for | Hours; then the calls, one row each; then the total hours and amount; then, when there are any, pieces billed before that have new hours (Area | Piece | New hours).
   - **Carried forward:** finished, billing later (Area | Piece | Reason); in progress with work in it, meaning building, ready, or with hours booked (Area | Piece | Where it stands: state, PR, and whether part of it is billed on this invoice); not started (Area | Piece), grouped by list.
   - **Not billing:** Area | Piece | Reason, for pieces still open or finished in this invoice's period (a first invoice's from `coverage_from`).

@@ -3,7 +3,7 @@
 The scheduled routing run reads each client's channels and drops each new message into the inbox of the list it belongs to. It only routes: the list's supervisor decides what each message means (`inbox.md`). These are the kit's rules for every run; how to read each channel is the client's own, in its repo's `.work/communication_channels.md`.
 
 ## The channels file
-One per client repo, written with the owner in plain words: a `## <channel>` section each, saying how to read it (a connector by name, or Claude in Chrome in a named profile), what to watch and what to ignore. `nh channels <repo>` prints it (started from the kit's template the first time) and saves his hand edits. Only the owner connects a connector or signs in a Chrome profile. While the file still has its `TEMPLATE:` line, no run reads it.
+One per client repo, written with the owner in plain words: a `## <channel>` section each, saying how to read it (a connector by name, or Claude in Chrome in a named profile), what to watch and what to ignore. `nh channels <repo>` prints it (started from the kit's template the first time) and saves the owner's hand edits. Only the owner connects a connector or signs in a Chrome profile. While the file still has its `TEMPLATE:` line, no run reads it.
 
 ## One run
 For each repo in this laptop's settings that has a channels file:

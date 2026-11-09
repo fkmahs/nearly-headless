@@ -265,6 +265,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--repo", action="append", default=[], help="name=path, once per repo")
     s.add_argument("--profile", default="", help="optional: the WWID profile repo's folder (wwid_profile), which "
                                                  "the wwid skill reads and records verdicts to")
+    s.add_argument("--auto-update", action="store_true", help="this laptop moves to each new release on its own, "
+                                                             "once a day (auto_update = true); off on a new laptop")
     s = sub.add_parser("test", help="Run only the checks the repo's change -> check map names for what this branch "
                                     "changed against origin/<base> (exit 1 = a check failed or a full run is needed; "
                                     "4 = Docker needed; 5 = the Linux image didn't build)",
@@ -687,7 +689,8 @@ def main(argv: list[str] | None = None) -> int:
                             for f in found))
             return 0 if all(f["ok"] for f in found) else 1
         if c in ("setup", "update"):
-            result = upkeep.setup(where, args.owner, args.repo, profile=args.profile) if c == "setup" else upkeep.update(where)
+            result = upkeep.setup(where, args.owner, args.repo, profile=args.profile,
+                                                       auto=args.auto_update) if c == "setup" else upkeep.update(where)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0
         if c == "check" and not (args.ack or args.fix_dates):

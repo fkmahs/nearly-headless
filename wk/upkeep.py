@@ -11,7 +11,8 @@ setup   writes this laptop's settings file (if it has none; else adds any --repo
         and an earlier auto-compact window, so long chats re-read less each turn; and, in every repo it lists, git's
         local exclude list of files that never go to GitHub (keepout.py), and its separate list checkout's
 update  moves this nearly-headless checkout to the newest release on GitHub, then lets that release install itself
-auto    once a day, any nh command checks GitHub and updates on its own, so nobody has to remember
+auto    once a day, any nh command checks GitHub and updates on its own, when `auto_update = true` (setup's
+        --auto-update; off on a new laptop, kept on for one that already had it)
 doctor  checks the settings, every repo, the skills, the instructions and CI against what nearly-headless expects
 """
 
@@ -178,7 +179,8 @@ HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, REPLY)  # ev
 
 def hook_command(spec: tuple = RECALL) -> str:
     """The kit's own launcher by its absolute path, never through PATH, so a hook runs this checkout whatever PATH
-    holds. Claude Code runs hook commands in Git Bash on Windows, so the sh launcher works everywhere."""
+    holds. Claude Code runs hook commands in Git Bash on Windows, and directly on macOS and Linux, where bin/nh is
+    executable (git keeps its mode), so the sh launcher works everywhere."""
     return f'"{core.posix(KIT / "bin" / "nh")}" {spec[2]}'
 
 
@@ -401,25 +403,26 @@ def add_profile(where: Path, given: str = "") -> dict:
     return {"profile": value, "added": True}
 
 
-def _top_level(where: Path, key: str, value: str, keep: bool) -> dict:
+def _top_level(where: Path, key: str, value: str | bool, keep: bool) -> dict:
     """Set one top-level line of the settings file (above its first table, every other line as it is). With `keep`,
     a value already there stays."""
     text = where.read_text(encoding="utf-8")
     current = tomllib.loads(text).get(key)
     if current == value or (keep and current not in (None, "")):
         return {key: current, "changed": False}
+    entry = f"{key} = {core.toml_str(value) if isinstance(value, str) else json.dumps(value)}\n"
     lines = text.splitlines(keepends=True)
     old = next((i for i, line in enumerate(lines) if re.match(rf"\s*{re.escape(key)}\s*=", line)
                 and not any(x.lstrip().startswith("[") for x in lines[:i])), None)
     if old is not None:
-        lines[old] = f"{key} = {core.toml_str(value)}\n"
+        lines[old] = entry
     else:
         at = next((i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines))
         while at > 0 and not lines[at - 1].strip():
             at -= 1
         if at == len(lines) and lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
-        lines[at:at] = [f"{key} = {core.toml_str(value)}\n"]
+        lines[at:at] = [entry]
     new = "".join(lines)
     if tomllib.loads(new).get(key) != value:
         raise KitError(f"Setting {key} would change how {core.posix(where)} reads; nothing changed. "
@@ -441,6 +444,21 @@ def add_sections_from(where: Path) -> dict:
     from datetime import datetime, timezone
     stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return _top_level(where, "pr_sections_from", stamp, keep=True)
+
+
+def add_auto_update(where: Path, created: bool, on: bool = False) -> dict:
+    """`auto_update`: whether this laptop moves to each new release on its own. A new laptop gets it off, unless
+    setup's --auto-update asks for it; a settings file from before the setting existed had it on, so it stays on;
+    a value already there is kept, until --auto-update turns it on."""
+    if on:
+        done = _top_level(where, "auto_update", True, keep=False)
+    elif "auto_update" in tomllib.loads(where.read_text(encoding="utf-8")):
+        done = {"auto_update": settings.load(where).get("auto_update"), "changed": False}
+    else:
+        done = _top_level(where, "auto_update", not created, keep=True)
+    return done | ({} if done["auto_update"] is True else {
+        "how": "off: this laptop moves to a new release only when you run nh update. To have it check once a day "
+               "and update on its own, run nh setup --auto-update"})
 
 
 def install_guard(s: dict) -> dict:
@@ -503,7 +521,8 @@ def sync_mark(where: Path) -> dict:
     return {"mark": on, "changed": True, "require": want}
 
 
-def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | None = None, profile: str = "") -> dict:
+def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | None = None, profile: str = "",
+          auto: bool = False) -> dict:
     """repos are name=path pairs. An existing settings file is never overwritten: repos it lacks are added at its end,
     and the WWID profile repo when it has none (add_profile)."""
     if profile and not Path(profile).is_dir():
@@ -522,7 +541,8 @@ def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | No
     kept = keep_instructions(where, created)
     return {"settings": core.posix(where), "created": created, "instructions": kept,
             **({"repos": repos_done} if repos_done is not None else {}), "wwid_profile": add_profile(where, profile),
-            "kit": add_kit(where), "pr_sections": add_sections_from(where),
+            "kit": add_kit(where), "auto_update": add_auto_update(where, created, auto),
+            "pr_sections": add_sections_from(where),
             "reply_mark": sync_mark(where),
             "skills": install_skills(skills),
             "expectations": install_expectations(settings.load(where)), "hook": install_hook(), "clear_hook": install_hook(RECALL_CLEAR),
@@ -600,16 +620,16 @@ def update(where: Path, kit: Path | None = None) -> dict:
             "hook": done.get("hook"), "clear_hook": done.get("clear_hook"),
             "start_hook": done.get("start_hook"), "resume_hook": done.get("resume_hook"), "reply_hook": done.get("reply_hook"),
             "push": done.get("push"), "compact_window": done.get("compact_window"), "keep_out": done.get("keep_out"),
-            "kit": done.get("kit"), "privacy_guard": done.get("privacy_guard")}
+            "kit": done.get("kit"), "auto_update": done.get("auto_update"), "privacy_guard": done.get("privacy_guard")}
 
 
 def auto_update(where: Path, s: dict, today: str = "") -> dict | None:
-    """Once a day, the first wk command checks GitHub and updates if a newer release is out. Releases exist only after
-    the owner's yes, so this never brings in anything unapproved. It never stops the command: a failure is reported
+    """Once a day, the first nh command checks GitHub and updates if a newer release (a merge to the kit's main) is
+    out, when the settings file says `auto_update = true`. It never stops the command: a failure is reported
     and tried again: on the next command when the check itself failed (the day is stamped only once GitHub answered),
-    else the next day. It updates the laptop's kit (installed_kit), wherever it is run from. Off with
-    `auto_update = false` in the settings file."""
-    if s.get("auto_update") is False or os.environ.get("NH_AUTO_UPDATE") == "0":
+    else the next day. It updates the laptop's kit (installed_kit), wherever it is run from. Off unless the
+    settings file has `auto_update = true` (add_auto_update)."""
+    if s.get("auto_update") is not True or os.environ.get("NH_AUTO_UPDATE") == "0":
         return None
     stamp, today = where.parent / ".nearly-headless-checked", today or date.today().isoformat()
     if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == today:
@@ -723,6 +743,24 @@ def kit_checks(s: dict | None = None) -> list[dict]:
     return skill_checks() + expectations_check(s) + hook_check() + push_check() + window_check()
 
 
+def claude_found(which=shutil.which, home: Path | None = None, env: dict = os.environ) -> bool:
+    """Claude is on this laptop: the `claude` command, or the desktop app's own folder (Windows, macOS, Linux)."""
+    home = home or Path.home()
+    apps = [Path(env["APPDATA"]) / "Claude"] if env.get("APPDATA") else []
+    apps += [home / "Library" / "Application Support" / "Claude", home / ".config" / "Claude"]
+    return which("claude") is not None or any(a.is_dir() for a in apps)
+
+
+def claude_checks(found: list[dict], present: bool) -> list[dict]:
+    """Without Claude on the laptop, its lines say what setup installed for it, as warnings, never as ok: nothing
+    reads them yet."""
+    if present:
+        return found
+    note = [{"ok": True, "warn": True, "check": "Claude: not found on this laptop (no `claude` command or desktop "
+             "app): its skills, instructions and hooks are installed for when it is (docs/install.md, step 2)"}]
+    return note + [f | {"warn": True} if f["ok"] and f["check"].startswith("Claude:") else f for f in found]
+
+
 def docker_check(platform: str = sys.platform, which=shutil.which, run=None) -> list[dict]:
     """Off Linux, builders' tests run only in Docker's Linux container: missing or stopped Docker is a failure, with
     the fix. Linux needs no Docker for that."""
@@ -807,7 +845,7 @@ def doctor(s: dict, where: Path) -> list[dict]:
     except KitError as exc:
         add(False, str(exc))
     add(shutil.which("gh") is not None, "GitHub CLI (gh) installed")
-    found += kit_checks(s) + docker_check()
+    found += claude_checks(kit_checks(s), claude_found()) + docker_check()
     for name in s.get("repos") or {}:
         try:
             top = settings.repo(s, name)

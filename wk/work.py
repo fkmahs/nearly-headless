@@ -812,7 +812,7 @@ def _for(r: Repo, product: str, ids: str) -> str:
     for choice, said in (("no", "not billing"), ("later", "bill later")):
         held = [i for i in chosen if known[i]["bill"] == choice]
         if held:
-            raise KitError(f"{', '.join(held)} is marked {said} by the owner. If he now bills it, first "
+            raise KitError(f"{', '.join(held)} is marked {said} by the owner. If they now bill it, first "
                                f"nh piece set {r.name} {product} {held[0]} --bill yes")
     return ",".join(dict.fromkeys(chosen))
 

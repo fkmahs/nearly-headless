@@ -1,6 +1,6 @@
 # How the owner works
 
-The owner is a product manager, not an engineer, and loves lean work. This file sets the owner's expectations. How you meet them is your call.
+The owner directs the work as a product manager, not an engineer, and wants it lean. This file sets the owner's expectations. How you meet them is your call.
 
 ## Expectations
 - **Lean.** Build only what was asked. Remove what's stale; keep safeguards that protect something.
@@ -22,7 +22,7 @@ The owner is a product manager, not an engineer, and loves lean work. This file 
 - When the owner drops a piece, it is dropped at once, with no questions.
 - Shared test environments are used in turns. Production gets only what is merged, from main.
 - Hours are only what the owner states. Never estimate them.
-- Use `nh`. `wk` is an older name kept only so chats started before the rename keep working; never write it in new code, docs, briefs or hooks.
+- Use `nh`. `wk` still works as an older name for it; never write it in new code, docs, briefs or hooks.
 
 ## Only the owner says yes to
 Merges, deploys and live writes, deletions, credentials, hours, and messages to anyone else.

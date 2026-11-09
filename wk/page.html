@@ -517,8 +517,8 @@ document.getElementById("l-count").textContent = loose.length ? `${loose.length}
 document.getElementById("l-body").innerHTML = loose.length ? loose.map(l => `<div class="item"><span class="pill p-wait">Tidy</span><div class="what">${esc(l.text)}</div><div class="meta">${esc(l.repo)}</div></div>`).join("")
   : `<p style="margin:0;color:var(--ok);font-weight:600">Nothing left lying around.</p>`;
 document.getElementById("k-state").textContent = kitState;
-document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version <b style="color:var(--ink)">${esc(D.kit.version)}</b>${D.kit.behind ? ` · <b style="color:var(--wait)">${esc(D.kit.latest)}</b> is out and installs itself on the next nh command` : " · the newest release"}.</p>
-  <p style="margin:0;color:var(--muted)">${D.kit.stale_skills.length ? esc(D.kit.stale_skills.join("; ")) : "Skills and your expectations are current for every agent on this laptop."} It checks GitHub once a day and updates itself.</p>`;
+document.getElementById("k-body").innerHTML = `<p style="margin:0 0 6px">Version <b style="color:var(--ink)">${esc(D.kit.version)}</b>${D.kit.behind ? ` · <b style="color:var(--wait)">${esc(D.kit.latest)}</b> is out and ${D.kit.auto ? "installs itself on the next nh command" : "installs with nh update"}` : " · the newest release"}.</p>
+  <p style="margin:0;color:var(--muted)">${D.kit.stale_skills.length ? esc(D.kit.stale_skills.join("; ")) : "Skills and your expectations are current for every agent on this laptop."} ${D.kit.auto ? "It checks GitHub once a day and updates itself." : "It updates when you run nh update (auto_update is off)."}</p>`;
 // ---------------------------------------------------------------- how nearly-headless runs: every part, read from this laptop
 // D.system comes from wk/system.py: the hooks setup installs, each role with its skill or command text, the settings.
 // The picture is drawn wide (one map) or, on a phone, as the steps in order with the parts beside each.
