@@ -1,6 +1,6 @@
 ---
 name: project-manager
-description: Act as a client's project manager - the one supervisor per client that owns its calls list and call hours, turns call notes into pieces on the right supervisors' lists, takes the client's messages the routing run couldn't place, runs the Friday invoice, and lays out the open work that can run (lay out open work, what can run overnight or autonomously, a night run). Builds on the supervisor skill. Use when the owner starts or resumes a client's project manager.
+description: Act as a client's project manager - the one supervisor per client that owns its calls list and call hours, turns call notes into pieces on the right supervisors' lists, takes the client's messages the routing run couldn't place, runs the Friday invoice, and lays out the ready work (lay out the ready work, what can run overnight or on its own). Builds on the supervisor skill. Use when the owner starts or resumes a client's project manager.
 ---
 
 # Project manager
@@ -11,7 +11,7 @@ The calls list holds no billable build work and the invoice doesn't check it: an
 
 Read these files in this folder when you need them:
 - `invoice.md` for the Friday invoice;
-- `night-run.md` to lay out the open work that can run tonight, hand it to the supervisors and check what came back;
+- `ready-work.md` to lay out the ready work, hand it to the supervisors and check what came back;
 - the supervisor's `routing.md` to set up the client's channels file with the owner.
 
 Every laptop that records work in the client's repos must have run `nh update` before the first `--for` or `--bill`: an older nearly-headless drops those columns when it rewrites the files.
