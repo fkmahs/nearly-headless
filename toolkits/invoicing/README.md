@@ -26,6 +26,7 @@ The client's project manager runs it with the owner, in one pass: see the `proje
 - `make <repo> --through <Friday>`: refused while preview lists problems. Freezes the statement, records it in the ledger, marks the hours in each repo and prints the PDF to `Documents/Invoices`.
 - `pdf <repo> <ID>` prints an invoice's PDF again; it refuses when the statement no longer matches the hash in the ledger, so a hand-edited statement never prints.
 - `sent <repo> <ID>`, later `paid`, once the owner has sent it.
+- `sent|paid <repo> <ID> --date <day> --fix` corrects a date already set (never into the future, never paid before sent); the old date stays in the invoice's `history` and the commit says it was corrected.
 - `check <repo>` proves every statement still equals the hours marked with its number, nothing changed after it was made, and shows billed and outstanding.
 
 A piece counts as finished on the day it last became merged, or `done` for work finished without a PR (a finding, an outcome), after being open, or became merged after done; a piece merged before nearly-headless 1.21 kept that date counts as finished on the day its row last changed, which is never before it merged. It is covered by unbilled hours, or by billed hours dated, or on an invoice whose period ends, on or after that day: hours billed before it finished paid only for the work up to then. The calls list holds no build work, so its pieces are not checked.

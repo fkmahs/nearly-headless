@@ -550,11 +550,13 @@ def print_pdf(c: Client, inv: str) -> str:
     raise Refused("No Chrome or Edge could print the PDF (set INVOICING_BROWSER)")
 
 
-def mark(c: Client, inv: str, field: str, day: str = "") -> dict:
+def mark(c: Client, inv: str, field: str, day: str = "", fix: bool = False) -> dict:
     ledger = c.ledger()
     rec = ledger.get(inv)
     if not rec:
         raise Refused(f"No invoice {inv} for {c.name}")
+    if fix:
+        return correct(c, ledger, inv, field, day)
     if rec.get(field):
         raise Refused(f"{inv} is already marked {field} on {rec[field]}")
     if field == "paid" and not rec.get("sent"):
@@ -563,6 +565,33 @@ def mark(c: Client, inv: str, field: str, day: str = "") -> dict:
     c.save_ledger(ledger)
     commit(c, f"{inv}: {field} {rec[field]}")
     return {"invoice": inv, field: rec[field]}
+
+
+def correct(c: Client, ledger: dict, inv: str, field: str, day: str) -> dict:
+    """Change a sent or paid date already set, keeping the old one in the invoice's history."""
+    rec = ledger[inv]
+    if not day:
+        raise Refused(f"--fix needs --date: the correct {field} date")
+    old = rec.get(field)
+    if not old:
+        raise Refused(f"{inv} is not marked {field} yet: mark it without --fix")
+    try:
+        new = date.fromisoformat(day).isoformat()
+    except ValueError:
+        raise Refused(f"{day} is not a date (YYYY-MM-DD)") from None
+    if new == old:
+        raise Refused(f"{inv} is already marked {field} on {old}")
+    if new > date.today().isoformat():
+        raise Refused(f"{new} is in the future")
+    if field == "paid" and rec.get("sent") and new < rec["sent"]:
+        raise Refused(f"{inv} would be paid on {new}, before it was sent on {rec['sent']}")
+    if field == "sent" and rec.get("paid") and new > rec["paid"]:
+        raise Refused(f"{inv} would be sent on {new}, after it was paid on {rec['paid']}")
+    rec[field] = new
+    rec.setdefault("history", []).append({"field": field, "from": old, "to": new, "on": date.today().isoformat()})
+    c.save_ledger(ledger)
+    commit(c, f"{inv}: {field} corrected {old} -> {new}")
+    return {"invoice": inv, field: new, "was": old}
 
 
 def check(c: Client) -> dict:
@@ -580,6 +609,8 @@ def check(c: Client) -> dict:
     for inv, rec in sorted(ledger.items()):
         if rec.get("paid") and not rec.get("sent"):
             found.append(f"{inv}: paid but not sent")
+        elif rec.get("paid") and rec["paid"] < rec["sent"]:
+            found.append(f"{inv}: paid before it was sent")
         if rec.get("imported"):
             continue
         missing = [k for k in rec["sha256"] if not (c.dir / f"{inv}.{k}").is_file()]
@@ -634,13 +665,14 @@ def main(argv: list[str] | None = None) -> int:
         s.add_argument("invoice")
         if name != "pdf":
             s.add_argument("--date", default="")
+            s.add_argument("--fix", action="store_true", help="correct a date already set (needs --date)")
     sub.add_parser("check").add_argument("client", metavar="repo", help="the client repo holding billing/")
     a = p.parse_args(argv)
     try:
         c = Client(a.billing or billing_dir(a.client), a.client)
         result = (preview(c, a.through) if a.cmd == "preview" else make(c, a.through, a.date, not a.no_pdf)
                   if a.cmd == "make" else {"pdf": print_pdf(c, a.invoice.upper())} if a.cmd == "pdf"
-                  else mark(c, a.invoice.upper(), a.cmd, a.date) if a.cmd in ("sent", "paid") else check(c))
+                  else mark(c, a.invoice.upper(), a.cmd, a.date, a.fix) if a.cmd in ("sent", "paid") else check(c))
     except Refused as exc:
         print(f"invoice: {exc}", file=sys.stderr)
         return 1
