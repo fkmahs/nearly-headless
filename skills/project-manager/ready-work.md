@@ -6,7 +6,7 @@ When the owner asks what can run (lay out the ready work, all the open work, wha
 For the client's repo: `nh status` and `nh --json product list <repo>` (each list and its supervisor's chat), then for each list `nh piece list`, the note of each open piece (`nh piece note`), `nh --json question list` (each question with its options and recommendation) and `gh pr list`. Say how many pieces and lists you read.
 
 ## Risks first
-Before the tables, what would stop a run: two items touching the same files (say they will run one after another), a shared test environment's sign-in or turn, anything that would reach production. Nothing in the run touches production.
+Before the tables, what would stop a run: two items touching the same files (say they will run one after another), a shared test environment's sign-in or turn, anything that would reach production. Nothing a builder starts touches production; a production release goes only through Ready to deploy, on the owner's yes.
 
 ## Four tables, numbered across all four
 Numbering runs on from table to table, so the owner can reply "send 1, 3, 7".
