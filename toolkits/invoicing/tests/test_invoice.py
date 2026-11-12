@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -150,6 +150,60 @@ class Invoicing(Acme):
             invoice.print_pdf(self.c, "ACM-INV-001")
         self.assertIn("ACM-INV-001.md is missing or was changed after the invoice was made, so no PDF is printed",
                       str(caught.exception))
+
+    def sent_and_paid(self):
+        invoice.make(self.c, "2026-10-23", "2026-10-23", pdf=False)
+        self.assertEqual(self.run_invoice("sent", "acme", "ACM-INV-001", "--date", "2026-10-23")[0], 0)
+        self.assertEqual(self.run_invoice("paid", "acme", "ACM-INV-001", "--date", "2026-10-30")[0], 0)
+
+    def test_fix_corrects_a_date_and_keeps_the_old_one(self):
+        self.sent_and_paid()
+        code, out = self.run_invoice("paid", "acme", "ACM-INV-001", "--date", "2026-10-29", "--fix")
+        self.assertEqual(code, 0, out)
+        rec = self.c.ledger()["ACM-INV-001"]
+        self.assertEqual(rec["paid"], "2026-10-29")
+        self.assertEqual(rec["history"], [{"field": "paid", "from": "2026-10-30", "to": "2026-10-29",
+                                           "on": date.today().isoformat()}])
+        log = subprocess.run(["git", "-C", str(self.c.dir), "log", "-1", "--format=%s"], capture_output=True,
+                             text=True).stdout.strip()
+        self.assertEqual(log, "acme ACM-INV-001: paid corrected 2026-10-30 -> 2026-10-29")
+        self.assertEqual(self.run_invoice("sent", "acme", "ACM-INV-001", "--date", "2026-10-22", "--fix")[0], 0)
+        self.assertEqual(len(self.c.ledger()["ACM-INV-001"]["history"]), 2)
+        self.assertTrue(invoice.check(self.c)["ok"])
+
+    def test_fix_refuses_what_it_cannot_correct(self):
+        invoice.make(self.c, "2026-10-23", "2026-10-23", pdf=False)
+        code, out = self.run_invoice("sent", "acme", "ACM-INV-001", "--date", "2026-10-24", "--fix")  # nothing set
+        self.assertEqual(code, 1)
+        self.assertIn("is not marked sent yet: mark it without --fix", out)
+        self.assertEqual(self.run_invoice("sent", "acme", "ACM-INV-001", "--date", "2026-10-23")[0], 0)
+        self.assertEqual(self.run_invoice("paid", "acme", "ACM-INV-001", "--date", "2026-10-30")[0], 0)
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        for field, day, says in [("paid", "", "--fix needs --date"),
+                                 ("paid", "2026-10-30", "already marked paid on 2026-10-30"),
+                                 ("paid", "2026-10-3x", "is not a date"),
+                                 ("paid", tomorrow, "is in the future"),
+                                 ("paid", "2026-10-22", "before it was sent on 2026-10-23"),
+                                 ("sent", "2026-10-31", "after it was paid on 2026-10-30")]:
+            args = ["--date", day] if day else []
+            code, out = self.run_invoice(field, "acme", "ACM-INV-001", *args, "--fix")
+            self.assertEqual(code, 1, (field, day))
+            self.assertIn(says, out)
+        rec = self.c.ledger()["ACM-INV-001"]
+        self.assertEqual((rec["sent"], rec["paid"], rec.get("history")), ("2026-10-23", "2026-10-30", None))
+
+    def test_without_fix_a_set_date_still_refuses(self):
+        self.sent_and_paid()
+        code, out = self.run_invoice("paid", "acme", "ACM-INV-001", "--date", "2026-10-29")
+        self.assertEqual(code, 1)
+        self.assertIn("already marked paid on 2026-10-30", out)
+
+    def test_check_catches_paid_before_sent(self):
+        self.sent_and_paid()
+        ledger = self.c.ledger()
+        ledger["ACM-INV-001"]["paid"] = "2026-10-20"
+        self.c.save_ledger(ledger)
+        self.assertIn("ACM-INV-001: paid before it was sent", invoice.check(self.c)["problems"])
 
     def test_line_breaks_of_any_kind_in_a_note_read_back_exactly(self):
         view = invoice.preview(self.c, "2026-10-23")

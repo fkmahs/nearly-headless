@@ -10,4 +10,4 @@ One pass with the owner, not one per list. `<repo>` is the client repo holding `
    - **Carried forward:** finished, billing later (with the reason); in progress with work in it (where it stands: state, PR); not started, grouped by list.
    - **Not billing:** each piece with its reason.
    - **Fix before make:** every problem; `make` refuses while any is left, including a finished piece not covered.
-6. **On the owner's yes:** `py invoice.py make <repo> --through <Friday>`. The owner reviews the PDF and sends it themselves. Then `py invoice.py sent <repo> <ID>`, later `paid`.
+6. **On the owner's yes:** `py invoice.py make <repo> --through <Friday>`. The owner reviews the PDF and sends it themselves. Then `py invoice.py sent <repo> <ID>`, later `paid`. A wrong sent or paid date is corrected with `--date <day> --fix`.
