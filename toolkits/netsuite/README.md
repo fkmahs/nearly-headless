@@ -6,6 +6,7 @@ Optional. For repos that work on a NetSuite account. Each repo keeps its own Net
 |---|---|
 | `query.py` | read-only SuiteQL over NetSuite's REST API; pages through the whole result and writes it to a CSV or JSON file |
 | `sdf.py` | the SDF deploy tool: imports, validation, sandbox deploys under turns, production deploys from `main` behind the approval gates and a production compare. Settings come from the repo's `sdf.toml` |
+| `audit.md` | the production-readiness checklist: run it before a NetSuite change goes to production, and put its output in the PR |
 
 ## Setup (once per account)
 
@@ -54,6 +55,7 @@ Add to the repo's AGENTS.md:
 Query NetSuite with the kit's toolkit, from this repo's folder:
 `py <nearly-headless>/toolkits/netsuite/query.py --env sb|prod "<SuiteQL>" --out <file>.csv|.json`
 Credentials: NETSUITE_<ENV>_* in this repo's .env. Read-only; never print the values.
+Before a NetSuite change goes to production, run <nearly-headless>/toolkits/netsuite/audit.md and put its output in the PR.
 ```
 
 ## Querying

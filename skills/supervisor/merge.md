@@ -7,6 +7,8 @@ Every reviewed PR gets both models' views, each from a fresh read-only subagent 
 
 The riskiest changes (data, money, credentials, production writes, hooks, CI) always get both rounds.
 
+A reviewer of a NetSuite PR bound for production is also briefed with the kit's `toolkits/netsuite/audit.md`.
+
 Before asking, clear the PR's `nh check` finding "Needs the latest main" with `nh refresh --pr <N>`, from the PR's repo: it merges main in the builder's worktree; clean, it pushes, waits for CI, posts `Ready @ <sha>` and prints that sha. It refuses, changing nothing, where CI isn't the full proof (the latest Ready doesn't say `Gap checks: none`, or the PR touches the map's full-run row), on a conflict (aborted) or failing CI (no Ready): then message the builder to refresh (take main, re-run the mapped checks, re-screenshot, report the new sha). A batch of releases goes in order, each refreshed after the one before merges.
 
 No reviewer for wording-only changes (no code, tests, hooks, settings or workflows: read the diff), or for shas that only merge main or bump the version. Post the findings and their handling on the PR.
