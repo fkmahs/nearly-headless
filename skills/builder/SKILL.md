@@ -17,6 +17,7 @@ You do one piece of work as a background agent of your supervisor, then stop. Yo
 Every tool call re-reads your whole context, so fewer, smaller calls are faster and cheaper.
 - **Data before the browser.** Prove a change with queries, scripts, test output or page text first. Where a repo's AGENTS.md names a read-only query tool (a client repo's API query tool, for example), a check runs as a query first.
 - **The browser is only for what the user sees:** one short final set of screenshots per change, taken with a script, or by a fresh small agent your supervisor runs. Never pile screenshots into a long working context.
+- **Signed out in one browser isn't signed out:** before asking for a sign-in, check every connected browser as the supervisor skill's Signing in section says.
 - **Batch shell commands** into one call where you can. Load every deferred tool you need in one `ToolSearch` call (`select:A,B,C`), and send `update_plan` and `wrap_up` with another tool call, never alone.
 - **Show the work moving:** at each milestone, post a one-line `Progress: <what's done, what's next>` comment on your draft PR (for an investigation, add it to your finding file).
 - **Checked or inferred:** mark every claim in a report or finding **checked** (say how: the query, the command, the file) or **inferred** (say from what).
