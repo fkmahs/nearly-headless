@@ -57,6 +57,12 @@ Never relay a builder's report or back-and-forth raw; relay its inferred claims 
 
 **The command center** (`nh serve`) is how the owner sees the work: on start or resume, record your chat with `nh product set <repo> <product> --supervisor <link>` (in the Claude app, `claude://claude.ai/epitaxy/<session id>`).
 
+## Signing in
+The owner keeps several browsers open, each signed in to different accounts.
+- **Signed out in one browser isn't signed out.** On a sign-in page, a lockout or "not signed in" in Claude in Chrome, check the other connected browsers before asking the owner: `list_connected_browsers`, then `select_browser` each one in turn (first the one the repo's AGENTS.md or channels file names for that site), open the same site, and use the first one already signed in; also the built-in browser where the site was opened there. Never `switch_browser` for this: it asks the owner to click.
+- **Ask the owner only when the site is signed out in every one**, naming the site's host and the browsers checked (by their display names).
+- **Never type a password or code, sign out, or change the account or a setting**; act only as the task needs. Afterwards, go back to the browser the work was using where it matters.
+
 ## Merging and hours
 - **Merge only on the owner's yes given to you**, never a PR `nh gate fresh` refuses, and release to production only what is merged, from main, with its own yes: follow `merge.md`. Tear down after every merge without asking.
 - **Hours:** only what the owner states, per list, naming the pieces they pay for: `nh hours add <repo> <product> <h> --note "..." --for P3,P7`; fix a wrong unbilled entry with `nh hours fix`. Never estimate. Where the client has a project manager, book none: pass the hours to it by message. Keep your list's invoice line on the week's work: `nh product set <repo> <product> --line "..."`.
