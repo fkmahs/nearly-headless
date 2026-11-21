@@ -247,8 +247,12 @@ def sections(c: Client, rows: list[dict], rate: float) -> list[dict]:
 
 
 def period_start(c: Client, rows: list[dict]) -> str:
+    """After the last invoice; a first invoice starts at coverage_from (or its first hours, if earlier)."""
     ends = [v["period"][1] for v in c.ledger().values()]
-    return (date.fromisoformat(max(ends)) + timedelta(days=1)).isoformat() if ends else (rows[0]["date"] if rows else "")
+    if ends:
+        return (date.fromisoformat(max(ends)) + timedelta(days=1)).isoformat()
+    starts = [str(d) for d in (c.cfg.get("coverage_from"), rows[0]["date"] if rows else "") if d]
+    return min(starts) if starts else ""
 
 
 # ---------------------------------------------------------------- commands

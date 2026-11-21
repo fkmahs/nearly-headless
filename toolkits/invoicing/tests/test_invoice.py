@@ -124,6 +124,7 @@ class Invoicing(Acme):
     def test_make_marks_hours_and_check_agrees(self):
         view = invoice.preview(self.c, "2026-10-23")
         self.assertEqual((view["id"], view["hours"], view["amount"]), ("ACM-INV-001", 2.5, 250.0))
+        self.assertEqual(view["period"], ["2026-10-01", "2026-10-23"])  # a first invoice starts at coverage_from
         self.assertEqual([s["title"] for s in view["sections"]], ["Reporting", "Calls with Acme"])
         result = invoice.make(self.c, "2026-10-23", "2026-10-23", pdf=False)
         self.assertEqual(result["marked"], ["acme"])
@@ -477,7 +478,7 @@ class Preview(Acme):
         today = date.today().isoformat()
         code, out = self.run_invoice("preview", "acme", "--through", today)
         self.assertEqual(code, 0, out)
-        for row in (f"# ACM-INV-001 preview: 2026-10-20 to {today}",
+        for row in (f"# ACM-INV-001 preview: 2026-10-01 to {today}",
                     "| reports | **Built** the monthly reports | Monthly reports | 3 |",
                     "| 2026-10-21 | Call with Sam: scope | 0.5 |",
                     "**Total:** 3.5 hours, 350.00 USD at 100 USD/h",
@@ -662,7 +663,8 @@ class OlderStatements(Acme):
         by = invoice.preview(self.c, "2026-10-23")["rows"][0]["by"]  # who booked them depends on where tests run
         invoice.make(self.c, "2026-10-23", "2026-10-23", pdf=False)
         self.assertEqual((self.c.dir / "ACM-INV-001.md").read_text(encoding="utf-8"),
-                         OLD_MD.replace("| Pat Lee |", f"| {by} |"))
+                         OLD_MD.replace("| Pat Lee |", f"| {by} |")
+                         .replace("2026-10-20 to", "2026-10-01 to"))  # a first invoice starts at coverage_from
 
     def test_a_statement_made_before_named_lines_reads_and_checks_unchanged(self):
         invoice.make(self.c, "2026-10-23", "2026-10-23", pdf=False)
