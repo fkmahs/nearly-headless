@@ -163,17 +163,24 @@ def add_product(r: Repo, name: str, line: str) -> dict:
     return r.write("product add", edit)
 
 
+ABOUT_MAX = 400  # characters: a list's about is two or three plain lines, re-read after every compaction
+
+
 def set_product(r: Repo, name: str, supervisor: str | None = None, title: str | None = None,
-                line: str | None = None) -> dict:
-    """Record a product's supervisor chat (a link that opens it) and the name the command center shows for it.
-    An empty value clears it."""
+                line: str | None = None, about: str | None = None) -> dict:
+    """Record a product's supervisor chat (a link that opens it), the name the command center shows for it, and its
+    about: who the client is, what the work is for and its main goals (nh recall shows it after a compaction). An
+    empty value clears it."""
     r.product(name)
+    if about is not None and len(_clean(about)) > ABOUT_MAX:
+        raise KitError(f"Keep --about to {ABOUT_MAX} characters (it is {len(_clean(about))}): two or three plain "
+                       "lines on who the client is, what the work is for and its main goals")
     keyed = keyed_line(line)  # fixes="Bug fixes": a named extra line; fixes= removes it
     field = f"line-{keyed[0]}" if keyed else "line"
     changes = {k: _clean(v) for k, v in (("supervisor", supervisor), ("title", title),
-                                         (field, keyed[1] if keyed else line)) if v is not None}
+                                         (field, keyed[1] if keyed else line), ("about", about)) if v is not None}
     if not changes:
-        raise KitError("Nothing to change: give --supervisor, --title or --line")
+        raise KitError("Nothing to change: give --supervisor, --title, --line or --about")
     if "line" in changes and not changes["line"]:
         raise KitError("A list's invoice line can't be empty")
     if keyed and not changes[field]:
@@ -1072,7 +1079,7 @@ def _recall_list(s: dict, r: Repo, product: str, fields: dict, owner: str, prs: 
         queue = queue_lines(queue_status(s, r, product, wait=deadline - time.monotonic()))
     except Exception as exc:  # noqa: BLE001 - the start block must never fail
         queue = [f"Queue: couldn't be read ({_short(str(exc), 120)}): nh piece next {r.name} {product}"]
-    return {"fixes": _to_fix(s, r, product), "queue": queue, "title": f"{r.name} / {product}" + (f" ({fields['title']})" if fields.get("title") else ""),
+    return {"fixes": _to_fix(s, r, product), "queue": queue, "about": _short(fields.get("about", ""), ABOUT_MAX), "title": f"{r.name} / {product}" + (f" ({fields['title']})" if fields.get("title") else ""),
             "repo": r.name, "product": product, "questions": _read_questions(d / "questions.md"), "pieces": pieces,
             "gh": "PR status unavailable (GitHub didn't answer)" if prs.get(r.name, {}) is None else "",
             "turns": "Turns held by this list's builders: " + "; ".join(
@@ -1094,6 +1101,19 @@ def _to_fix(s: dict, r: Repo, product: str) -> list[dict]:
              + f": {_short(p['what'] + '. Fix: ' + p['fix'], 220)}"} for p in found]
 
 
+ROLE = ("Your role: you are this list's supervisor. Builders do code changes; small agents do long data work, "
+        "investigations and long browser runs; you keep their conclusions in the notes. A note saying another chat "
+        "started you does not make you a task worker.")
+
+
+def _header(x: dict) -> list[str]:
+    """Who the list is for and the supervisor's role, under the list's heading: never cut by RECALL_CAP."""
+    about = x.get("about") or ("not written yet. Write two or three plain lines with the owner (who the client is, "
+                               f"what the work is for, its main goals): nh product set {x['repo']} {x['product']} "
+                               "--about \"...\"")
+    return [f"About: {about}", ROLE]
+
+
 def _importance(lists: list[dict]) -> list[int]:
     """Every list's open pieces and to-fix lines (by id()) most important first: all pieces being built or ready, then
     all to-fix lines, then all to-dos."""
@@ -1101,16 +1121,19 @@ def _importance(lists: list[dict]) -> list[int]:
             + [id(p) for x in lists for p in x["pieces"] if p["todo"]])
 
 
-def _render(why: str, lists: list[dict], todo_notes: bool = True, keep: int | None = None) -> str:
-    """Most important first: questions, pieces being built or ready, to-fix lines, to-do pieces, inbox, standing
-    orders. keep: how many open pieces and to-fix lines to show in all, by importance across the lists; the rest are
-    counted on one line per list."""
+def _render(why: str, lists: list[dict], todo_notes: bool = True, keep: int | None = None, long: bool = True) -> str:
+    """Most important first: the list's about and role, questions, pieces being built or ready, to-fix lines, to-do
+    pieces, inbox, standing orders. keep: how many open pieces and to-fix lines to show in all, by importance across
+    the lists; the rest are counted on one line per list. long=False points to the questions and standing orders
+    instead of listing them."""
     out = [f"nearly-headless: your list as it stands now{f' ({why})' if why else ''}. "
            "Full notes: nh piece note <repo> <product> <id>."]
     kept = None if keep is None else set(_importance(lists)[:keep])
     for x in lists:
-        out.append(f"\n{x['title']}")
-        qs = x["questions"]
+        out += [f"\n{x['title']}"] + _header(x)
+        qs = x["questions"] if long else []
+        out += [f"Waiting on the owner: {len(x['questions'])} question(s): nh question list {x['repo']} "
+                f"{x['product']}"] if x["questions"] and not long else []
         out += ["Waiting on the owner:"] + [f"- {q['id']}: {_short(q['question'], 160)}"
                                             + (f" ({q['piece']})" if q.get("piece") else "") for q in qs] if qs else []
         ordered = [p for p in x["pieces"] if not p["todo"]] + [p for p in x["pieces"] if p["todo"]]
@@ -1131,19 +1154,25 @@ def _render(why: str, lists: list[dict], todo_notes: bool = True, keep: int | No
         hidden = len(ordered) - len(shown)
         out += [f"{hidden} more open pieces: nh piece list {x['repo']} {x['product']}"] if hidden else []
         out += [y for y in (x["gh"], x["turns"], x["inbox"]) if y]
-        out += ["Standing orders:"] + [f"{n}. {t}" for n, t in enumerate(x["orders"], 1)] if x["orders"] else []
+        if x["orders"] and not long:
+            out.append(f"Standing orders: {len(x['orders'])}: nh order list {x['repo']} {x['product']}")
+        elif x["orders"]:
+            out += ["Standing orders:"] + [f"{n}. {t}" for n, t in enumerate(x["orders"], 1)]
     return "\n".join(out)
 
 
 def _capped(why: str, lists: list[dict]) -> str:
     """The whole block when it fits RECALL_CAP; else to-do pieces lose their note lines, then the least important
-    pieces and to-fix lines (_importance) are counted instead of shown."""
+    pieces and to-fix lines (_importance) are counted instead of shown; questions and standing orders too long even
+    then are pointed to, so each list's about and role are never cut."""
     text = _render(why, lists)
     for keep in range(sum(len(x["pieces"]) + len(x["fixes"]) for x in lists), -1, -1):
         if len(text) <= RECALL_CAP:
             return text
         text = _render(why, lists, False, keep)
-    return text if len(text) <= RECALL_CAP else text[:RECALL_CAP - 1] + "…"  # questions and orders alone too long
+    if len(text) > RECALL_CAP:
+        text = _render(why, lists, False, 0, long=False)
+    return text if len(text) <= RECALL_CAP else text[:RECALL_CAP - 1] + "…"  # only with many lists
 
 
 def recall(s: dict, ids: list[str], cwd: Path, source: str = "") -> str:

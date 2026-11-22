@@ -309,6 +309,18 @@ class Check(unittest.TestCase):
             self.assertEqual(bool(view["alerts"]), not waits, view["alerts"])  # parked: no alert either
         self.assertIn("f.waits", dashboard.PAGE.read_text(encoding="utf-8"))  # the page reads the mark
 
+    def test_a_supervised_list_without_an_about_is_a_finding(self):
+        about = lambda: [p for p in self.found() if p["kind"] == "about"]  # noqa: E731
+        self.assertEqual(about(), [])  # no supervisor yet: parked, nothing to write
+        self.wk("product", "set", "acme", "reports", "--supervisor", "https://claude.ai/chat/1")
+        got = about()
+        self.assertEqual(len(got), 1)
+        self.assertIn("nh product set acme reports --about", check.line(got[0]))
+        self.assertEqual(check.at_start(self.s, "acme", "reports"), [p for p in check.at_start(self.s, "acme", "reports")
+                                                                     if p["kind"] != "about"])  # recall says it itself
+        self.wk("product", "set", "acme", "reports", "--about", "A monthly reporting service; the work keeps month end fast.")
+        self.assertEqual(about(), [])
+
     def test_fix_dates_rewrites_one_lists_dates_once_in_one_commit(self):
         note = self.app / ".work" / "reports" / "notes" / "P1.md"
         note.write_text("\ufeff# P1 · x\n\nBrief.\n- 2026-09-01 cutover\n- 2026-10-15 to 2026-10-20 import window\n\n"

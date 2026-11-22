@@ -79,6 +79,9 @@ def parser() -> argparse.ArgumentParser:
                                   "product set only; add refuses key=")
     s.add_argument("--supervisor", help="set: the supervisor's chat, as a link that opens it (empty clears it)")
     s.add_argument("--title", help="set: the name the command center shows, e.g. \"AP automation\"")
+    s.add_argument("--about", help="set: two or three plain lines on who the client is, what the work is for and its "
+                                   "main goals, written with the owner (nh recall shows it after a compaction; "
+                                   "400 characters at most; empty clears it)")
 
     def where(s):
         s.add_argument("repo", help="the repo's name in this laptop's settings")
@@ -228,7 +231,8 @@ def parser() -> argparse.ArgumentParser:
                                "beside the settings file. Always exits 0.")
     s.add_argument("--remind", action="store_true",
                    help="run by a UserPromptSubmit hook: print one line naming the required parts (nothing when none "
-                        "are set), so the reply is right the first time")
+                        "are set), so the reply is right the first time; and one line after a supervisor turn that "
+                        "used more than [reply] long_turn (default 40) of its own tool calls")
 
     s = sub.add_parser("health", help="Is the system healthier on tokens? One table by period, per day, with the "
                                       "nearly-headless version live and a verdict per measure (read-only)",
@@ -337,7 +341,7 @@ def _product(args, s):
     if args.action == "set":
         if not args.name:
             raise KitError("nh product set needs the product's name")
-        return work.set_product(r, args.name, args.supervisor, args.title, args.line)
+        return work.set_product(r, args.name, args.supervisor, args.title, args.line, args.about)
     products = r.products()
     return products, "\n".join(f"{p}: {v.get('line', '')}" + (f"  (supervisor: {v['supervisor']})"
                                                                  if v.get("supervisor") else "")
@@ -563,7 +567,7 @@ def _reply_check(args) -> int:
             return 0
         where = settings.path(args.settings)
         if args.remind:
-            line = "" if hook.get("agent_id") else reply.remind(settings.load(where))
+            line = "" if hook.get("agent_id") else reply.remind(settings.load(where), hook)
             if line:
                 print(line)
             return 0

@@ -814,6 +814,46 @@ class Work(unittest.TestCase):
         self.assertIn("more open pieces: nh piece list acme reports", out)
         self.assertNotIn("more open pieces: nh piece list acme portal", out)
 
+    def test_product_set_about_is_kept_capped_and_cleared(self):
+        code, out = self.wk("product", "set", "acme", "reports", "--about", "A reporting service.  Goal: fast month end.")
+        self.assertEqual(code, 0, out)
+        r = work.Repo(settings.load(self.settings), "acme")
+        self.assertEqual(r.products()["reports"]["about"], "A reporting service. Goal: fast month end.")
+        self.assertEqual(r.products()["reports"]["line"], "Monthly reports")  # the invoice line is apart
+        self.assertEqual(self.wk("product", "set", "acme", "reports", "--about", "x" * (work.ABOUT_MAX + 1))[0], 2)
+        self.assertEqual(r.products()["reports"]["about"], "A reporting service. Goal: fast month end.")
+        self.assertEqual(self.wk("product", "set", "acme", "reports", "--about", "")[0], 0)
+        self.assertNotIn("about", r.products()["reports"])
+
+    def test_recall_opens_each_list_with_its_about_and_role_which_the_cap_never_cuts(self):
+        sid = "local_eeee5555-6666"
+        self.wk("product", "set", "acme", "reports", "--supervisor", f"claude://claude.ai/epitaxy/{sid}")
+        self.wk("piece", "add", "acme", "reports", "Faster export")
+        hook = {"session_id": sid, "cwd": str(self.tmp), "source": "compact"}
+        lines = self.recall(hook)[1].splitlines()
+        head = lines.index("acme / reports")
+        self.assertTrue(lines[head + 1].startswith("About: not written yet."), lines)
+        self.assertIn("nh product set acme reports --about", lines[head + 1])
+        self.assertEqual(lines[head + 2], work.ROLE)
+        self.assertEqual(sum("nh product set acme reports --about" in x for x in lines), 1)  # not again as a fix
+        about = "A reporting service for a small firm. The work keeps month end fast and the reports right."
+        self.wk("product", "set", "acme", "reports", "--about", about)
+        lines = self.recall(hook)[1].splitlines()
+        self.assertEqual(lines[head + 1:head + 3], [f"About: {about}", work.ROLE])
+        # a long about (an older file, never set through nh) is cut on print; huge questions and orders are pointed to
+        products = self.app / ".work" / "products.toml"
+        products.write_text(products.read_text(encoding="utf-8").replace(about, "word " * 200), encoding="utf-8")
+        for i in range(30):
+            self.wk("question", "add", "acme", "reports", f"Question {i} " + "long " * 40, "--list-wide")
+            self.wk("order", "add", "acme", "reports", f"Order {i} " + "long " * 40)
+        out = self.recall(hook)[1]
+        self.assertLessEqual(len(out), work.RECALL_CAP)
+        lines = out.splitlines()
+        self.assertTrue(lines[head + 1].startswith("About: word") and len(lines[head + 1]) <= work.ABOUT_MAX + 8)
+        self.assertEqual(lines[head + 2], work.ROLE)
+        self.assertIn("Waiting on the owner: 30 question(s): nh question list acme reports", out)
+        self.assertIn("Standing orders: 30: nh order list acme reports", out)
+
     def test_recall_stays_under_its_cap_trimming_to_do_notes_first(self):
         sid = "local_cccc3333-4444"
         self.wk("product", "set", "acme", "reports", "--supervisor", f"claude://claude.ai/epitaxy/{sid}")
