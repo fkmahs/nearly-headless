@@ -187,6 +187,31 @@ class Check(unittest.TestCase):
         self.assertEqual(self.wk("check", "acme", "--ack", "branch:stray", "--reason", "Owner keeps it")[0], 0)
         self.assertEqual([p["item"] for p in self.found() if p["kind"] == "git"], ["branch worktree-agent-gone"])
 
+    def test_a_question_whose_pieces_pr_ended_is_flagged(self):
+        self.rows(state="ready", pr="5", branch="p1")
+        self.wk("question", "add", "acme", "reports", "Ship the export?", "--piece", "P1")  # no --pr: its piece's
+        self.prs = [{"number": 5, "state": "OPEN", "headRefName": "p1"}]
+        self.assertNotIn("question", [p["kind"] for p in self.found()])
+        self.prs[0]["state"] = "CLOSED"
+        self.assertIn(("Q1", "is about PR #5, which is closed"),
+                      [(p["item"], p["what"]) for p in self.found() if p["kind"] == "question"])
+
+    def test_a_merged_piece_left_standing_is_flagged(self):
+        sh(self.app, "branch", "p1")
+        sh(self.app, "push", "origin", "p1")
+        self.rows(state="merged", pr="5", branch="p1")
+        self.prs = [{"number": 5, "state": "MERGED", "headRefName": "p1"}]
+        found = [p for p in self.found() if p["kind"] in ("teardown", "git")]
+        self.assertEqual([(p["kind"], p["item"], p["what"]) for p in found],
+                         [("teardown", "P1", "is merged but p1 still has a local branch, a branch on GitHub")])
+        worktree = self.tmp / "wt"
+        sh(self.app, "worktree", "add", "-q", str(worktree), "p1")
+        self.assertIn("a worktree, a local branch", [p["what"] for p in self.found() if p["kind"] == "teardown"][0])
+        sh(self.app, "worktree", "remove", str(worktree))
+        sh(self.app, "branch", "-D", "p1")
+        sh(self.app, "push", "-q", "origin", "--delete", "p1")
+        self.assertNotIn("teardown", [p["kind"] for p in self.found()])
+
     def test_repo_wide_problems_belong_to_one_list(self):
         self.prs = [{"number": 6, "state": "OPEN", "headRefName": "orphan-pr"}]
         self.assertEqual([check.line(p) for p in self.found("reports")], [
@@ -716,7 +741,7 @@ class Check(unittest.TestCase):
         left = sorted((p["item"], p["kind"]) for p in self.found())
         self.assertEqual(left, sorted([k for k in kinds if k not in {
             ("P1", "github"), ("P2", "github"), ("branch worktree-agent-done", "git")}]
-            + [("branch p1", "git")]))  # P1 finished, so its branch on GitHub is now a leftover: the owner's yes
+            + [("P1", "teardown")]))  # P1 merged, so its branch on GitHub is a tear-down left undone
         self.assertIn(("P3", "github"), left)
         self.assertIn(("P4", "name"), left)
         self.assertIn(("Q1", "question"), left)

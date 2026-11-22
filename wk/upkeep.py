@@ -7,7 +7,8 @@ setup   writes this laptop's settings file (if it has none; else adds any --repo
         hook that gives a supervisor its list when a chat starts or resumes and after its memory is compacted or cleared
         (`nh recall`), the hook
         that holds a supervisor's reply to the format (`nh reply-check`, off until the settings file lists the parts)
-        and the one that names those parts before each turn (`nh reply-check --remind`),
+        and the one that names those parts before each turn (`nh reply-check --remind`), the one that refuses a raw
+        gh pr merge in a supervisor chat (`nh merge-guard`),
         and an earlier auto-compact window, so long chats re-read less each turn; and, in every repo it lists, git's
         local exclude list of files that never go to GitHub (keepout.py), and its separate list checkout's
 update  moves this nearly-headless checkout to the newest release on GitHub, then lets that release install itself
@@ -174,7 +175,8 @@ RECALL_START = ("SessionStart", "startup", "recall")  # and when a chat starts, 
 RECALL_RESUME = ("SessionStart", "resume", "recall")  # and when the owner resumes a chat
 REPLY = ("Stop", None, "reply-check")           # holds a supervisor's reply to the format; off until configured
 REMIND = ("UserPromptSubmit", None, "reply-check --remind")  # names those parts before each turn; off the same way
-HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, REPLY)  # every hook setup installs, in a chat's order
+MERGE_GUARD = ("PreToolUse", "Bash|PowerShell", "merge-guard")  # refuses a raw gh pr merge in a supervisor chat
+HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, MERGE_GUARD, REPLY)  # every hook setup installs, in a chat's order
 
 
 def hook_command(spec: tuple = RECALL) -> str:
@@ -547,7 +549,7 @@ def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | No
             "skills": install_skills(skills),
             "expectations": install_expectations(settings.load(where)), "hook": install_hook(), "clear_hook": install_hook(RECALL_CLEAR),
             "start_hook": install_hook(RECALL_START), "resume_hook": install_hook(RECALL_RESUME), "reply_hook": install_hook(REPLY),
-            "remind_hook": install_hook(REMIND), "push": install_push(), "compact_window": install_window(),
+            "remind_hook": install_hook(REMIND), "merge_guard_hook": install_hook(MERGE_GUARD), "push": install_push(), "compact_window": install_window(),
             "keep_out": install_keepout(settings.load(where)), "privacy_guard": install_guard(settings.load(where)),
             "agents": [a["agent"] for a in agents()],
             "version": __version__, "launcher": core.posix(KIT / "bin"),
@@ -698,7 +700,9 @@ def hook_check() -> list[dict]:
                        (RECALL_START, "Claude: supervisors get their list when a chat starts (nh recall hook)"),
                        (RECALL_RESUME, "Claude: supervisors get their list when a chat resumes (nh recall hook)"),
                        (REMIND, "Claude: supervisors are reminded of the parts in [reply] require before each turn, "
-                                "when set (nh reply-check --remind hook)")):
+                                "when set (nh reply-check --remind hook)"),
+                       (MERGE_GUARD, "Claude: a raw gh pr merge in a supervisor chat is refused, pointing to nh merge "
+                                     "(nh merge-guard hook)")):
         found.append({"ok": bool(hook_installed(spec)), "check": what})
     return found
 

@@ -855,6 +855,37 @@ class Work(unittest.TestCase):
         self.assertIn("Standing orders: 30: nh order list acme reports", out)
         self.assertIn("- P1 todo: Faster export", out)  # pieces that fit are still shown
 
+    def test_the_browser_map_is_set_listed_cleared_and_recalled_in_one_line(self):
+        code, out = self.wk("browser", "set", "acme", "reports", "https://App.Example.com/login", "Chrome (work)",
+                            "--account", "the controller")
+        self.assertEqual(code, 0, out)
+        self.wk("browser", "set", "acme", "reports", "mail.example.com", "Edge")
+        self.wk("browser", "set", "acme", "reports", "app.example.com", "Chrome (home)")  # changes, never doubles
+        rows = self.wk("browser", "list", "acme", "reports")[1].splitlines()
+        self.assertEqual(len(rows), 3, rows)
+        self.assertTrue(rows[1].startswith("app.example.com") and "Chrome (home)" in rows[1], rows)
+        self.assertIn("mail.example.com", rows[2])
+        self.assertIn("Edge", self.on_github(".work/reports/browsers.tsv"))  # in the list's files, pushed
+        sid = "local_bbbb7777-8888"
+        self.wk("product", "set", "acme", "reports", "--supervisor", f"claude://claude.ai/epitaxy/{sid}")
+        hook = {"session_id": sid, "cwd": str(self.tmp), "source": "compact"}
+        lines = self.recall(hook)[1].splitlines()
+        head = lines.index("acme / reports")
+        self.assertEqual(lines[head + 3], "Browsers (use these; check the signed-in account before any write): "
+                                          "app.example.com: Chrome (home); mail.example.com: Edge")
+        r = work.Repo(settings.load(self.settings), "acme")
+        for i in range(40):  # a long map stays one short line, inside the cap
+            work.browser_set(r, "reports", f"site{i}.example.com", "Chrome (work)", "a long account label")
+        out = self.recall(hook)[1]
+        line = [x for x in out.splitlines() if x.startswith("Browsers")][0]
+        self.assertLessEqual(len(line), work.BROWSERS_MAX)
+        self.assertLessEqual(len(out), work.RECALL_CAP)
+        self.assertEqual(self.wk("browser", "clear", "acme", "reports", "mail.example.com")[0], 0)
+        self.assertNotIn("mail.example.com", self.wk("browser", "list", "acme", "reports")[1])
+        self.assertEqual(self.wk("browser", "clear", "acme", "reports")[0], 0)
+        self.assertEqual(self.wk("browser", "list", "acme", "reports")[1].strip(), "No browsers recorded")
+        self.assertEqual(self.wk("browser", "clear", "acme", "reports")[0], 2)  # nothing left to clear
+
     def test_recall_stays_under_its_cap_trimming_to_do_notes_first(self):
         sid = "local_cccc3333-4444"
         self.wk("product", "set", "acme", "reports", "--supervisor", f"claude://claude.ai/epitaxy/{sid}")

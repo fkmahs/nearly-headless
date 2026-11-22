@@ -17,6 +17,10 @@
     base = "main"              # default main
     list = "C:/Projects/app-list"  # optional: the checkout holding its list (.work/), when not this one
     public = true              # optional: anyone can read it, so the privacy guard checks its pushes and PRs
+    release = ["update", "command-center"]  # optional: what nh merge --release runs after tagging (the kit's own
+                               # repo gets these when unset): nh update, then wait for the command center's version
+    version_file = "VERSION"   # optional: the file nh merge --release checks (default: wk/__init__.py, package.json,
+                               # pyproject.toml or VERSION, the first that exists)
 
     [privacy]
     terms = ["Globex"]         # private names only the owner knows, added to the guard's list (privacy.py)
