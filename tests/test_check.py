@@ -194,7 +194,7 @@ class Check(unittest.TestCase):
             "Fix: nh piece set acme <list> <id> --pr 6 --branch orphan-pr"])
         self.wk("product", "add", "acme", "portal", "--line", "The customer portal")
         self.assertEqual(self.found("portal")[0]["owner"], "")  # two lists, neither supervised: unclear, both see it
-        self.wk("product", "set", "acme", "portal", "--supervisor", "claude://x")
+        self.wk("product", "set", "acme", "portal", "--supervisor", "claude://x", "--about", "A customer portal.")
         self.assertEqual(self.found("reports"), [])  # only the supervised list acts on it
         self.assertEqual(self.found("portal")[0]["owner"], "portal")
         self.wk("product", "add", "acme", "calls", "--line", "Calls")
