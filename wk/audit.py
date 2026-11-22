@@ -35,11 +35,12 @@ _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
-_STEP = re.compile(r"&&|\|\||[;|\n]")  # one command line holds steps; each must start with the command to count
+_STEP = re.compile(r"&&|\|\||[;|\n]|[\"']")  # one command line holds steps; each must start with the command to count
 _THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?"  # PowerShell's `; if ($?) { ... }` runs it too
-_MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?\s+pr\s+merge\b(.*)$", re.S)
+_FLAGS = r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*"  # a tool's own flags before its subcommand: gh -R acme/app pr ...
+_MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
 _FRESH = re.compile(_THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)"
-                    r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*\s+gate\s+fresh\b(.*)$", re.S)
+                    + _FLAGS + r"\s+gate\s+fresh\b(.*)$", re.S)
 _PR = re.compile(r"--pr[ =]+#?(\d+)|/pull/(\d+)")
 _VALUE = re.compile(r"--?(?:match-head-commit|repo|R|subject|t|body|b|author-email|A)[ =]+\S+")
 _NUMBER = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)")
@@ -87,7 +88,7 @@ def steps(command: str) -> list[tuple[str, int | None]]:
     """The command's merges and fresh gates, in order, as ("merge"|"gate", PR number or None): only steps that run
     the command itself, never one inside a grep or an echo, nor a --help."""
     found = []
-    for step in _STEP.split(command):
+    for step in _split(command):
         if reply._HELP.search(step):
             continue
         if m := _MERGE.match(step):
@@ -95,6 +96,19 @@ def steps(command: str) -> list[tuple[str, int | None]]:
         elif m := _FRESH.match(step):
             found.append(("gate", _pr_of(m.group(1))))
     return found
+
+
+def _split(command: str) -> list[str]:
+    """The command's steps, split at ;, &&, ||, | and new lines outside quotes."""
+    found, start, quote = [], 0, ""
+    for m in _STEP.finditer(command):
+        sep = m.group(0)
+        if sep in "\"'":
+            quote = "" if quote == sep else quote or sep
+        elif not quote:
+            found.append(command[start:m.start()])
+            start = m.end()
+    return found + [command[start:]]
 
 
 def _pr_of(args: str, merge: bool = False) -> int | None:
@@ -123,10 +137,14 @@ def chat(path: Path, since: datetime) -> dict | None:
     ended, roled, inside, summaries = True, False, False, 0
 
     def settle(found, was_inside, ok):
+        chained = False  # a gate earlier in the same command: a failed result may mean the merge never ran
         for kind, pr in found:
             if kind == "gate":
+                chained = True
                 if ok and pr is not None:
                     gates.add(pr)
+                continue
+            if chained and not ok:
                 continue
             if was_inside:
                 row["merges"] += 1

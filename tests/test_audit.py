@@ -121,9 +121,11 @@ class Measure(unittest.TestCase):
                          *ran(5.4, "nh gate fresh --pr 14", "f", "nh: refused: main moved", error=True),
                          *ran(5.3, "gh pr merge 14 --merge", "g"),  # its gate refused
                          *ran(5.2, 'nh gate fresh --pr 15 --sha abc1234 && gh pr merge 15 --merge', "h"),  # one line
-                         *ran(5.1, "gh pr merge --merge", "i")])  # no PR number: unknown, never gated
+                         *ran(5.1, "gh pr merge --merge", "i"),  # no PR number: unknown, never gated
+                         *ran(5.0, "nh gate fresh --pr 16 && gh pr merge 16", "j", "nh: refused", error=True),  # may
+                         *ran(4.9, "gh -R acme/app pr merge 17 --merge", "k")])  # never have run: not counted
         r = self.measure()["rows"][0]
-        self.assertEqual((r["merges"], r["merges_gated"], r["merges_unknown"]), (6, 2, 1))
+        self.assertEqual((r["merges"], r["merges_gated"], r["merges_unknown"]), (7, 2, 1))
 
     def test_merges_and_gates_inside_a_grep_an_echo_or_help_are_not_counted(self):
         self.chat("s1", [owner("look", 6),
@@ -133,6 +135,9 @@ class Measure(unittest.TestCase):
                          *ran(5.6, "cd app; if ($?) { gh pr merge 12 --merge }", "d")])
         self.assertEqual(audit.steps("cd app && nh --cwd app gate fresh --pr 9 && gh pr merge 9"),
                          [("gate", 9), ("merge", 9)])
+        self.assertEqual(audit.steps('echo "x; gh pr merge 5" && echo \'a | nh gate fresh --pr 5\''), [])
+        self.assertEqual(audit.steps('gh pr merge 6 --subject "a; b" ; gh --repo acme/app pr merge 7'),
+                         [("merge", 6), ("merge", 7)])
         r = self.measure()["rows"][0]
         self.assertEqual((r["merges"], r["merges_gated"], r["merges_unknown"]), (1, 0, 0))
 
