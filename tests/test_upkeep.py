@@ -124,7 +124,8 @@ class Upkeep(unittest.TestCase):
     def test_setup_writes_settings_once_and_installs_skills(self):
         result = upkeep.setup(self.settings, "Pat Lee", [f"app={self.app}"], self.skills)
         self.assertTrue(result["created"])
-        self.assertEqual(set(result["skills"]), {"builder", "catch-up", "project-manager", "supervisor", "wwid"})
+        self.assertEqual(set(result["skills"]), {"builder", "catch-up", "project-manager", "supervisor",
+                                                   "weekly-audit", "wwid"})
         self.assertTrue((self.skills / "supervisor" / "SKILL.md").is_file())
         for ref in ("merge.md", "brief.md", "handover.md"):  # reference files the skill says when to read
             self.assertTrue((self.skills / "supervisor" / ref).is_file())
