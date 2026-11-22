@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__, core
@@ -243,6 +244,18 @@ def parser() -> argparse.ArgumentParser:
                                    "the period before.")
     s.add_argument("--days", type=int, default=14, help="the long period's length in full days (default 14)")
     s.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="print JSON instead of the table")
+
+    s = sub.add_parser("audit", help="The weekly audit's counts over this laptop's chats (read-only; counts only, "
+                                     "never message text)",
+                       description="measure: reads every Claude Code chat changed in the last N days (agents' own "
+                                   "files skipped) and counts per chat its turns, own tool calls per turn, agents, "
+                                   "browser use, shell calls, compactions, merges and whether a fresh gate ran before "
+                                   "each, push notifications and keyword hits in the owner's messages. Writes "
+                                   "measure.json and measure.md to audits/<date>/ beside the settings file (never "
+                                   "inside a repo) and prints that folder. The weekly-audit skill reads them.")
+    s.add_argument("what", choices=["measure"])
+    s.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
+    s.add_argument("--out", type=Path, help="the folder to write to (default audits/<date>/ beside the settings)")
 
     s = sub.add_parser("serve", help="Open the command center: a local page showing every repo in the settings")
     s.add_argument("--port", type=int, default=8765)
@@ -678,6 +691,16 @@ def main(argv: list[str] | None = None) -> int:
                 raise KitError("--days must be 1 or more")
             h = health.health(days=args.days)
             print(json.dumps(h, indent=2) if args.json else health.text(h))
+            return 0
+        if c == "audit":
+            from . import audit
+            m = audit.measure(args.days)
+            out = audit.write(m, args.out or audit.folder(where, datetime.now()))
+            t = m["totals"]
+            print(core.posix(out))
+            print(f"{m['chats']} chats, {t['turns']} turns, {t['own_calls']} own tool calls, {t['agents']} agents, "
+                  f"{t['browser']} browser calls ({t['browser_picking']} picking), {t['merges']} merges "
+                  f"({t['merges_gated']} after a fresh gate)")
             return 0
         if c == "test":
             from . import testmap
