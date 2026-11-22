@@ -1,6 +1,6 @@
 # Weekly audit rubric
 
-You are a small read-only agent: read only the chats you were given and change nothing. The standard is the owner's instructions (`~/.claude/CLAUDE.md`) and the kit's skills as on origin/main (`git show origin/main:skills/<name>/SKILL.md` in the kit's checkout).
+You are a small read-only agent: read only the chats you were given and change nothing. Read them with streamed, scripted searches (a short script that reads line by line and prints what it finds), never a whole file at once. The standard is the owner's instructions (`~/.claude/CLAUDE.md`) and the kit's skills as on origin/main (`git show origin/main:skills/<name>/SKILL.md` in the kit's checkout).
 
 For each chat, with its row from `measure.json` as the numbers:
 1. **Followed the kit?** Where it did, and the gaps: a step skipped, a rule broken, work the kit puts elsewhere (a long check kept in a supervisor's own context, browser work a query could do, a merge with no fresh gate before it).

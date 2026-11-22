@@ -33,14 +33,16 @@ _KEYS = {k: re.compile("|".join(r"(?<!\w)" + re.escape(w) + (r"(?!\w)" if w[-1].
 _AGENT = ("Agent", "Task")
 _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
-_INJECTED = ("<system-reminder>", "<local-command", "<command-", "Caveat:", "<user-prompt-submit-hook>")
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
-_MERGE = re.compile(r"\bgh\s+pr\s+merge\b([^;&|\n]*)")
-_FRESH = re.compile(r"\bgate\s+fresh\b([^;&|\n]*)")
-_PR = re.compile(r"--pr[ =]+#?(\d+)")
+_STEP = re.compile(r"&&|\|\||[;|\n]")  # one command line holds steps; each must start with the command to count
+_THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?"  # PowerShell's `; if ($?) { ... }` runs it too
+_MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?\s+pr\s+merge\b(.*)$", re.S)
+_FRESH = re.compile(_THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)"
+                    r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*\s+gate\s+fresh\b(.*)$", re.S)
+_PR = re.compile(r"--pr[ =]+#?(\d+)|/pull/(\d+)")
+_VALUE = re.compile(r"--?(?:match-head-commit|repo|R|subject|t|body|b|author-email|A)[ =]+\S+")
 _NUMBER = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)")
-
 
 def root() -> Path:
     from . import usage
@@ -76,25 +78,61 @@ def _when(d: dict) -> datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
-def _typed(d: dict, blocks: list) -> str | None:
-    """The owner's own typed words: not a tool result, hook, reminder, slash-command echo or compaction summary."""
-    said = reply._owner_said(d, blocks)
-    return None if said is None or said.lstrip().startswith(_INJECTED) else said
-
-
 def _p90(values: list[int]) -> int:
     ordered = sorted(values)
     return ordered[max(0, -(-len(ordered) * 9 // 10) - 1)] if ordered else 0
 
 
+def steps(command: str) -> list[tuple[str, int | None]]:
+    """The command's merges and fresh gates, in order, as ("merge"|"gate", PR number or None): only steps that run
+    the command itself, never one inside a grep or an echo, nor a --help."""
+    found = []
+    for step in _STEP.split(command):
+        if reply._HELP.search(step):
+            continue
+        if m := _MERGE.match(step):
+            found.append(("merge", _pr_of(m.group(1), merge=True)))
+        elif m := _FRESH.match(step):
+            found.append(("gate", _pr_of(m.group(1))))
+    return found
+
+
+def _pr_of(args: str, merge: bool = False) -> int | None:
+    m = _PR.search(args) or (merge and _NUMBER.search(_VALUE.sub("", args)) or None)
+    return int(next(g for g in m.groups() if g)) if m else None
+
+
+def _passed(b: dict) -> bool:
+    """A tool result that is no error: the command ran and nothing in it says it was refused."""
+    content = b.get("content")
+    text = content if isinstance(content, str) else " ".join(
+        str(c.get("text", "")) for c in content if isinstance(c, dict)) if isinstance(content, list) else ""
+    return not b.get("is_error") and not re.search(r'"ok":\s*false|^Exit code [1-9]|^nh: ', text, re.M)
+
+
 def chat(path: Path, since: datetime) -> dict | None:
-    """One chat's counts from since on; None when nothing in it is that recent."""
+    """One chat's counts from since on; None when nothing in it is that recent. A turn already running when the
+    window opens counts once, whole."""
     row = {"session": path.stem, "project": path.parent.name, "first": "", "last": "", "role": "other",
            "owner_messages": 0, "turns": 0, "own_calls": {"total": 0, "median": 0, "p90": 0, "max": 0}, "agents": 0,
            "browser": 0, "browser_picking": 0, "shell": 0, "compactions": 0, "merges": 0, "merges_gated": 0,
-           "push_notifications": 0, "keywords": {k: 0 for k in KEYWORDS}}
-    turns: list[int] = []
-    ended, gates, roled, inside, summaries = True, set(), False, False, 0
+           "merges_unknown": 0, "push_notifications": 0, "keywords": {k: 0 for k in KEYWORDS}}
+    turns: list[list] = []  # [own calls, touched the window]
+    pending: dict = {}  # a shell call's id -> (its merges and gates, inside the window), until its result comes
+    gates: set = set()  # PRs with a passed fresh gate no merge has used yet
+    ended, roled, inside, summaries = True, False, False, 0
+
+    def settle(found, was_inside, ok):
+        for kind, pr in found:
+            if kind == "gate":
+                if ok and pr is not None:
+                    gates.add(pr)
+                continue
+            if was_inside:
+                row["merges"] += 1
+                row["merges_unknown"] += pr is None
+                row["merges_gated"] += pr in gates
+            gates.discard(pr)  # a gate is used up by the merge it came before
     for d in _entries(path):
         if d.get("isSidechain"):
             continue
@@ -105,6 +143,9 @@ def chat(path: Path, since: datetime) -> dict | None:
         if inside and t is not None:
             row["first"] = row["first"] or d["timestamp"]
             row["last"] = d["timestamp"]
+        starts = reply._owner_said(d, blocks) is not None or (reply._other(d, blocks) and ended)
+        if turns and inside and not starts:
+            turns[-1][1] = True
         said = reply._owner_said(d, blocks)
         if said is not None and not roled:  # the chat's first message says what it is, even before the window
             roled, row["role"] = True, next((r for r, p in _ROLES if p.search(said)), "other")
@@ -114,18 +155,14 @@ def chat(path: Path, since: datetime) -> dict | None:
                     continue
                 name = str(b.get("name", ""))
                 given = b.get("input") if isinstance(b.get("input"), dict) else {}
-                command = str(given.get("command", "")) if name in _SHELL else ""
-                merges = [_pr_of(m.group(1), merge=True) for m in _MERGE.finditer(command)]
-                if inside:
-                    row["merges"] += len(merges)
-                    row["merges_gated"] += sum(n in gates or (n is None and bool(gates)) for n in merges)
-                gates |= {_pr_of(m.group(1)) for m in _FRESH.finditer(command)} - {None}
+                if name in _SHELL and (found := steps(str(given.get("command", "")))):
+                    pending[b.get("id")] = (found, inside)
+                if not turns:  # the chat's first turn began before anything it wrote
+                    turns.append([0, inside])
+                if name not in reply._NOT_OWN and not reply._APP.search(name):  # as nh reply-check counts
+                    turns[-1][0] += 1
                 if not inside:
                     continue
-                if not turns:  # the turn began before the window: its calls inside it still count
-                    turns.append(0)
-                if name not in reply._NOT_OWN and not reply._APP.search(name):  # as nh reply-check counts
-                    turns[-1] += 1
                 row["agents"] += name in _AGENT
                 row["shell"] += name in _SHELL
                 row["push_notifications"] += name.endswith("PushNotification")
@@ -133,40 +170,38 @@ def chat(path: Path, since: datetime) -> dict | None:
                     row["browser"] += 1
                     row["browser_picking"] += bool(_PICK.search(name))
             continue
-        if not inside:
-            continue
+        for b in blocks:
+            if b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
+                settle(*pending.pop(b.get("tool_use_id")), _passed(b))
         if reply._ended(d):
             ended = True
             continue
         if d.get("type") == "system" and d.get("subtype") == "compact_boundary":
-            row["compactions"] += 1
+            row["compactions"] += inside
             continue
-        summaries += bool(d.get("isCompactSummary"))
-        typed = _typed(d, blocks)
-        if typed is not None:
+        summaries += bool(d.get("isCompactSummary")) and inside
+        if said is not None and inside:
             row["owner_messages"] += 1
             for k, p in _KEYS.items():
-                row["keywords"][k] += bool(p.search(typed))
-        if typed is not None or (reply._other(d, blocks) and ended):  # a hand-back mid-turn stays in that turn
-            turns.append(0)
+                row["keywords"][k] += bool(p.search(said))
+        if starts:  # a hand-back mid-turn stays in that turn
+            turns.append([0, inside])
             ended = False
+    for found, was_inside in pending.values():  # no result written: the gate's outcome is unknown
+        settle(found, was_inside, False)
     row["compactions"] = max(row["compactions"], summaries)  # older chats leave only the summary
-    if not (row["first"] or turns):
+    kept = [n for n, touched in turns if touched]
+    if not (row["first"] or kept):
         return None
-    row["turns"] = len(turns)
-    if turns:
-        row["own_calls"] = {"total": sum(turns), "median": int(statistics.median(turns)), "p90": _p90(turns),
-                            "max": max(turns)}
+    row["turns"] = len(kept)
+    if kept:
+        row["own_calls"] = {"total": sum(kept), "median": statistics.median(kept), "p90": _p90(kept),
+                            "max": max(kept)}
     return row
 
 
-def _pr_of(args: str, merge: bool = False) -> int | None:
-    m = _PR.search(args) or (merge and _NUMBER.search(re.sub(r"--match-head-commit[ =]+\S+", "", args)) or None)
-    return int(m.group(1)) if m else None
-
-
 TOTALS = ("owner_messages", "turns", "agents", "browser", "browser_picking", "shell", "compactions", "merges",
-          "merges_gated", "push_notifications")
+          "merges_gated", "merges_unknown", "push_notifications")
 
 
 def measure(days: int = 7, where: Path | None = None, now: datetime | None = None) -> dict:
@@ -197,15 +232,16 @@ def measure(days: int = 7, where: Path | None = None, now: datetime | None = Non
 
 def table(m: dict) -> str:
     head = ["project", "session", "role", "owner msgs", "turns", "calls", "median", "p90", "max", "agents", "browser",
-            "picking", "shell", "compactions", "merges", "gated", "pushes", "corrections", "status asks", "sign-in"]
+            "picking", "shell", "compactions", "merges", "gated", "unknown", "pushes", "corrections", "status asks",
+            "sign-in"]
     lines = [f"# Chats measured: {m['chats']} (last {m['days']} days, since {m['since']})", "",
              "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in m["rows"]:
         c, k = r["own_calls"], r["keywords"]
         cells = [r["project"], r["session"][:8], r["role"], r["owner_messages"], r["turns"], c["total"], c["median"],
                  c["p90"], c["max"], r["agents"], r["browser"], r["browser_picking"], r["shell"], r["compactions"],
-                 r["merges"], r["merges_gated"], r["push_notifications"], k["corrections"], k["status_asks"],
-                 k["sign_in_or_click"]]
+                 r["merges"], r["merges_gated"], r["merges_unknown"], r["push_notifications"],
+                 k["corrections"], k["status_asks"], k["sign_in_or_click"]]
         lines.append("| " + " | ".join(str(x) for x in cells) + " |")
     t = m["totals"]
     lines += ["", "Totals: " + ", ".join(f"{k.replace('_', ' ')} {t[k]}" for k in ("own_calls", *TOTALS))]

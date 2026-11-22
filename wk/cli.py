@@ -700,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
             print(core.posix(out))
             print(f"{m['chats']} chats, {t['turns']} turns, {t['own_calls']} own tool calls, {t['agents']} agents, "
                   f"{t['browser']} browser calls ({t['browser_picking']} picking), {t['merges']} merges "
-                  f"({t['merges_gated']} after a fresh gate)")
+                  f"({t['merges_gated']} after a passed fresh gate, {t['merges_unknown']} naming no PR)")
             return 0
         if c == "test":
             from . import testmap
