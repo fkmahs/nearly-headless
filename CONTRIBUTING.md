@@ -25,6 +25,7 @@ nearly-headless stays generic: no client names, tickets, billing figures or pers
 | `wk/cli.py`, `wk/core.py`, `wk/__main__.py` | the nearest tests: `python -m unittest tests.test_work`, plus the test files for the commands you changed |
 | `wk/privacy.py` | `python -m unittest tests.test_privacy tests.test_turns tests.test_upkeep` |
 | `bin/nh`, `bin/nh.cmd`, `bin/wk`, `bin/wk.cmd` (the launchers and their forwarding) | `python -m unittest tests.test_privacy tests.test_upkeep` |
+| `wk/audit.py` | `python -m unittest tests.test_audit` |
 | `wk/testmap.py` | `python -m unittest tests.test_testmap tests.test_turns` |
 | `wk-test.Dockerfile`, `wk/images/` (the Linux images `nh test` runs in; a changed file builds a new one) | `python -m unittest tests.test_testmap tests.test_work` |
 | `tests/test_<name>.py` | `python -m unittest tests.test_<name>` |
