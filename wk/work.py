@@ -1165,13 +1165,14 @@ def _capped(why: str, lists: list[dict]) -> str:
     """The whole block when it fits RECALL_CAP; else to-do pieces lose their note lines, then the least important
     pieces and to-fix lines (_importance) are counted instead of shown; questions and standing orders too long even
     then are pointed to, so each list's about and role are never cut."""
-    text = _render(why, lists)
-    for keep in range(sum(len(x["pieces"]) + len(x["fixes"]) for x in lists), -1, -1):
+    for long in (True, False):
+        text = _render(why, lists, long=long)
+        for keep in range(sum(len(x["pieces"]) + len(x["fixes"]) for x in lists), -1, -1):
+            if len(text) <= RECALL_CAP:
+                return text
+            text = _render(why, lists, False, keep, long)
         if len(text) <= RECALL_CAP:
             return text
-        text = _render(why, lists, False, keep)
-    if len(text) > RECALL_CAP:
-        text = _render(why, lists, False, 0, long=False)
     return text if len(text) <= RECALL_CAP else text[:RECALL_CAP - 1] + "…"  # only with many lists
 
 

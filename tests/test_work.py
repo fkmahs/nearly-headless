@@ -853,6 +853,7 @@ class Work(unittest.TestCase):
         self.assertEqual(lines[head + 2], work.ROLE)
         self.assertIn("Waiting on the owner: 30 question(s): nh question list acme reports", out)
         self.assertIn("Standing orders: 30: nh order list acme reports", out)
+        self.assertIn("- P1 todo: Faster export", out)  # pieces that fit are still shown
 
     def test_recall_stays_under_its_cap_trimming_to_do_notes_first(self):
         sid = "local_cccc3333-4444"

@@ -80,8 +80,12 @@ def remind(s: dict, hook: dict | None = None) -> str:
              + "."] if marks else []
     limit, hook = long_turn(s), hook or {}
     transcript = Path(str(hook.get("transcript_path") or ""))
-    if limit and not hook.get("agent_id") and hook.get("transcript_path") and transcript.is_file() \
-            and (n := own_calls(transcript)) > limit and is_supervisor(transcript):
+    try:  # a transcript that can't be read loses only this line, never the one above
+        long = limit and not hook.get("agent_id") and hook.get("transcript_path") and transcript.is_file() \
+            and (n := own_calls(transcript)) > limit and is_supervisor(transcript)
+    except Exception:  # noqa: BLE001 - a reminder must never fail
+        long = False
+    if long:
         lines.append(f"Your last turn used {n} of your own tool calls (over {limit}). A check stays with you when it "
                      "takes a handful of steps; a reconciliation, a run over many records, a production run or more "
                      "than a few pages of browser work goes to a fresh small agent, which returns only its conclusion.")
@@ -90,28 +94,35 @@ def remind(s: dict, hook: dict | None = None) -> str:
 
 def own_calls(transcript: Path) -> int:
     """The tool calls this chat made itself in its last turn: since the last message that started one (the owner's,
-    another chat's, an agent's hand-back), skipping the prompt just sent if it is already written. Subagents' calls,
-    handing work to agents, loading tools and the app's plan and wrap-up tools don't count."""
-    calls, started = 0, False
+    another chat's, an agent's hand-back), skipping the prompt just sent if it is already written. Another's message
+    starts a turn only once the one before it ended (as support() reads it); one arriving mid-turn stays part of it.
+    Subagents' calls, handing work to agents, loading tools and the app's plan and wrap-up tools don't count."""
+    calls, started, other = 0, False, False  # other: an earlier entry was another's message, maybe this turn's start
 
     def stop(d):
-        nonlocal calls, started
+        nonlocal calls, started, other
         if d.get("isSidechain"):
             return False
+        if other:  # read backwards, so this entry came just before another's message
+            if _ended(d):
+                return True  # that message started the turn
+            other = False
         blocks = _blocks(d)
         if d.get("type") == "assistant":
             started = True
             calls += sum(b.get("type") == "tool_use" and str(b.get("name", "")) not in _NOT_OWN
                          and not _APP.search(str(b.get("name", ""))) for b in blocks)
-        elif _owner_said(d, blocks) is not None or _other(d, blocks):
+        elif _owner_said(d, blocks) is not None:
             return started  # the turn's first message; one after the last reply is the prompt being sent
+        elif started and _other(d, blocks):
+            other = True
         return False
     _read_back(transcript, stop)
     return calls
 
 
 def _entries(transcript: Path):
-    with transcript.open(encoding="utf-8") as f:
+    with transcript.open(encoding="utf-8", errors="replace") as f:  # a half-written last line never stops a read
         for line in f:
             try:
                 d = json.loads(line)
