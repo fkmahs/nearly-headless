@@ -11,6 +11,7 @@ are kept: no message text, ever. Judging the chats is the skill's agents' job.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import statistics
@@ -36,10 +37,20 @@ _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
-_STEP = re.compile(r"&&|\|\||[;|\n]|[\"']")  # one command line holds steps; each must start with the command to count
-_THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?(?:[A-Za-z_]\w*=\S*\s+)*"  # PowerShell's `if ($?) {`, bash's `NAME=1 cmd`
+# one command line holds steps; each must start with the command to count. A group or subshell opens a step too:
+# ( { $( and PowerShell's if (...) { ... }.
+_STEP = re.compile(r"&&|\|\||\$\(|[;|\n(){}]|[\"']")
+# before the command: PowerShell's call operator &, NAME=1, and commands that run the next one (env, xargs, time...)
+_THEN = (r"^\s*&?\s*(?:(?:[A-Za-z_]\w*=\S*|env|xargs|time|command|builtin|exec|nohup|nice|sudo|doas|noglob|stdbuf"
+         r"|timeout)(?:\s+-[\w-]+(?:=\S*)?)*\s+)*")
 _FLAGS = r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*"  # a tool's own flags before its subcommand: gh -R acme/app pr ...
-_MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
+_GH = r"""(?:["'][^"']*[\\/]gh(?:\.exe)?["']|["']gh(?:\.exe)?["']|(?:[^\s"';&|]*[\\/])?gh(?:\.exe)?)"""
+_MERGE = re.compile(_THEN + _GH + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
+# a shell started with a command string: bash -c '...', pwsh -Command "...", powershell -EncodedCommand <base64>
+_SHELL_RUN = re.compile(_THEN + r"""["']?(?:[^\s"';&|]*[\\/])?(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd)(?:\.exe)?["']?"""
+                    r"(?=\s|$)(.*)$", re.I | re.S)
+_STRING = re.compile(r"(?:^|\s)(-(?:\w*c|command|encodedcommand|enc|ec|e)|/c)(?=\s)\s*(.*)$", re.I | re.S)
+_RAW = re.compile(r"(?<![\w-])gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b", re.I)  # a string nh can't read into
 _NH = _THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)" + _FLAGS
 _FRESH = re.compile(_NH + r"\s+gate\s+fresh\b(.*)$", re.S)
 _NH_MERGE = re.compile(_NH + r"\s+merge\b(.*)$", re.S)  # nh merge: the gate, CI and the merge in one step
@@ -89,11 +100,19 @@ def _p90(values: list[int]) -> int:
     return ordered[max(0, -(-len(ordered) * 9 // 10) - 1)] if ordered else 0
 
 
-def steps(command: str) -> list[tuple[str, int | None]]:
+def steps(command: str, depth: int = 0) -> list[tuple[str, int | None]]:
     """The command's merges and fresh gates, in order, as ("merge"|"gate"|"nh merge", PR number or None): only steps
-    that run the command itself, never one inside a grep or an echo, nor a --help or an nh merge --dry-run."""
+    that run the command itself, never one inside a grep or an echo, nor a --help or an nh merge --dry-run. A shell
+    started with a command string (bash -c, pwsh -Command or -EncodedCommand) is read into; one that can't be read
+    counts as a merge if gh pr merge appears in it."""
     found = []
     for step in _split(command):
+        if (shell := _SHELL_RUN.match(step)) and (inner := _inner(shell.group(1))) != "":
+            if inner is not None and depth < 3:
+                found += steps(inner, depth + 1)
+            elif _RAW.search(step):
+                found.append(("merge", None))
+            continue
         if reply._HELP.search(step):
             continue
         if m := _MERGE.match(step):
@@ -105,8 +124,30 @@ def steps(command: str) -> list[tuple[str, int | None]]:
     return found
 
 
+def _inner(args: str) -> str | None:
+    """The command string a shell was given ("" when it was given none; None when it can't be read)."""
+    m = _STRING.search(args)
+    if not m:
+        return ""
+    flag, rest = m.group(1).lower(), m.group(2).strip()
+    if flag in ("-ec", "-enc", "-encodedcommand") or (flag == "-e" and rest[:1] not in ("'", '"')):
+        try:
+            return base64.b64decode(rest.split()[0].strip("'\""), validate=True).decode("utf-16-le")
+        except (ValueError, IndexError, UnicodeDecodeError):
+            if flag != "-e":  # bash -e is not PowerShell's -EncodedCommand: its rest is read as it is
+                return None
+    return _quoted(rest)
+
+
+def _quoted(rest: str) -> str:
+    if rest[:1] in ("'", '"'):
+        end = rest.find(rest[0], 1)
+        return rest[1:end] if end > 0 else rest[1:]
+    return rest
+
+
 def _split(command: str) -> list[str]:
-    """The command's steps, split at ;, &&, ||, | and new lines outside quotes."""
+    """The command's steps, split outside quotes at ;, &&, ||, |, new lines and where a group opens or closes."""
     found, start, quote = [], 0, ""
     for m in _STEP.finditer(command):
         sep = m.group(0)

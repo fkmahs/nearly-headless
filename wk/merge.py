@@ -181,7 +181,7 @@ def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str =
     state = data.get("state")
     full = (data.get("headRefOid") or "").lower()
     if state == "MERGED":
-        if not (full.startswith(sha) or _said(data, _carried(sha, full))):
+        if not (full.startswith(sha) or _said(data, _carried(sha, full), by=_me(top))):
             run.stop("approve", f"{where} PR #{pr} was merged at {full[:12] or 'an unknown head'}, not at the approved "
                                 f"{sha} (nor carried over to it): look on GitHub before anything else")
         run.ok("approve", f"PR #{pr} is already merged at {full[:12]}: approve, gate and ci are behind it; resuming")
@@ -284,9 +284,20 @@ def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str =
     return "\n".join(run.lines + ["Not done: no production deploy (nh merge never deploys)."])
 
 
-def _said(data: dict, line: str) -> bool:
-    """The PR already carries this comment."""
-    return any(line.casefold() in (c.get("body") or "").casefold() for c in data.get("comments") or [])
+def _said(data: dict, line: str, by: str | None = None) -> bool:
+    """The PR already carries this comment (posted by `by`, when given: the gh account nh merge runs as, since
+    anyone who can comment could post the words)."""
+    return any(line.casefold() in (c.get("body") or "").casefold()
+               and (by is None or ((c.get("author") or {}).get("login") or "").casefold() == by.casefold())
+               for c in data.get("comments") or [])
+
+
+def _me(top: Path) -> str:
+    """The gh account this laptop is signed in as."""
+    try:
+        return turns._gh(top, "api", "user", "--jq", ".login").strip()
+    except KitError:
+        return ""
 
 
 def _carried(sha: str, head: str) -> str:

@@ -72,7 +72,7 @@ class Merge(unittest.TestCase):
         if args[:2] == ("pr", "view"):
             return json.dumps(self.pr)
         if args[:2] == ("pr", "comment"):
-            self.pr["comments"].append({"body": args[args.index("--body") + 1]})
+            self.pr["comments"].append({"body": args[args.index("--body") + 1], "author": {"login": "the-bot"}})
             return ""
         if args[:2] == ("pr", "merge"):
             assert "--squash" not in args and "--rebase" not in args
@@ -88,6 +88,8 @@ class Merge(unittest.TestCase):
             sh(work_, "push", "-q", "origin", "main")
             self.pr |= {"state": "MERGED", "mergeCommit": {"oid": sh(work_, "rev-parse", "HEAD")}}
             return ""
+        if args[:2] == ("api", "user"):
+            return "the-bot\n"
         if args[0] == "api":
             return "[]"
         raise AssertionError(args)
@@ -166,6 +168,17 @@ class Merge(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("STOP  approve:", out)
         self.assertIn("not at the approved abcdef1", out)
+
+    def test_a_carried_over_yes_counts_for_a_resume_only_from_the_gh_account_nh_merge_runs_as(self):
+        old = "abcdef1"
+        self.pr |= {"state": "MERGED", "mergeCommit": {"oid": self.head},
+                    "comments": [{"body": merge._carried(old, self.head), "author": {"login": "a-commenter"}}]}
+        code, out = self.nh("merge", "--pr", "7", "--sha", old)
+        self.assertEqual(code, 1)
+        self.assertIn("STOP  approve:", out)
+        self.pr["comments"][0]["author"]["login"] = "The-Bot"
+        code, out = self.nh("merge", "--pr", "7", "--sha", old)
+        self.assertIn("ok    approve: PR #7 is already merged", out)
 
     def test_run_from_the_prs_own_worktree_leaves_its_local_part_and_succeeds(self):
         out, err = io.StringIO(), io.StringIO()
@@ -302,8 +315,16 @@ class Guard(unittest.TestCase):
                         "cd app; if ($?) { gh pr merge 14 }", "FOO=1 gh pr merge 14"):
             self.assertIn('"deny"', self.run_hook(command, self.sup), command)
         self.assertIn('"deny"', self.run_hook("gh pr merge 14", self.sup, tool_name="PowerShell"))
+        encoded = __import__("base64").b64encode("gh pr merge 5".encode("utf-16-le")).decode()
+        for command in ("& gh pr merge 5", r"& 'C:\Program Files\GitHub CLI\gh.exe' pr merge 5",
+                        "bash -c 'gh pr merge 5'", 'pwsh -Command "gh pr merge 5"', "bash -lc 'cd x && gh pr merge 5'",
+                        "pwsh -NoProfile -EncodedCommand " + encoded, "cmd /c gh pr merge 5",
+                        "$(gh pr merge 5)", "(gh pr merge 5)", "{ gh pr merge 5; }", "if (1) { gh pr merge 5 }",
+                        "env gh pr merge 5", "xargs gh pr merge", "time gh pr merge 5", "sudo -E gh pr merge 5"):
+            self.assertIn('"deny"', self.run_hook(command, self.sup), command)
         for command in ('grep -n "gh pr merge" skills/supervisor/merge.md', 'git commit -m "use gh pr merge less"',
-                        "echo 'gh pr merge 7'", "gh pr merge --help"):
+                        "echo 'gh pr merge 7'", "gh pr merge --help", "bash -c 'grep \"gh pr merge\" x'",
+                        "bash script.sh"):
             self.assertEqual(self.run_hook(command, self.sup), "", command)
 
     def test_everything_else_is_let_through(self):
