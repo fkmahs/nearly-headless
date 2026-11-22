@@ -30,8 +30,6 @@ KEYWORDS = {
 }
 _KEYS = {k: re.compile("|".join(r"(?<!\w)" + re.escape(w) + (r"(?!\w)" if w[-1].isalnum() else "") for w in words),
                        re.I) for k, words in KEYWORDS.items()}
-_NOT_OWN = ("Agent", "Task", "ToolSearch", "SendMessage")  # handing work off, or loading tools, is not doing it
-_APP = re.compile(r"__(?:update_plan|wrap_up)$")
 _AGENT = ("Agent", "Task")
 _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
@@ -126,7 +124,7 @@ def chat(path: Path, since: datetime) -> dict | None:
                     continue
                 if not turns:  # the turn began before the window: its calls inside it still count
                     turns.append(0)
-                if name not in _NOT_OWN and not _APP.search(name):
+                if name not in reply._NOT_OWN and not reply._APP.search(name):  # as nh reply-check counts
                     turns[-1] += 1
                 row["agents"] += name in _AGENT
                 row["shell"] += name in _SHELL
