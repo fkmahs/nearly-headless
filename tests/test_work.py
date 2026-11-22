@@ -885,6 +885,11 @@ class Work(unittest.TestCase):
         self.assertEqual(self.wk("browser", "clear", "acme", "reports")[0], 0)
         self.assertEqual(self.wk("browser", "list", "acme", "reports")[1].strip(), "No browsers recorded")
         self.assertEqual(self.wk("browser", "clear", "acme", "reports")[0], 2)  # nothing left to clear
+        code, out = self.wk("browser", "set", "acme", "reports", "app.example.com", "Edge", "--account",
+                            "pat.lee@example.com")  # an email address is refused: a role or short label instead
+        self.assertEqual(code, 2)
+        self.assertIn("not an email address", out)
+        self.assertEqual(self.wk("browser", "list", "acme", "reports")[1].strip(), "No browsers recorded")
 
     def test_recall_stays_under_its_cap_trimming_to_do_notes_first(self):
         sid = "local_cccc3333-4444"

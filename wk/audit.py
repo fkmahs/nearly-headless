@@ -37,7 +37,7 @@ _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing 
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
 _STEP = re.compile(r"&&|\|\||[;|\n]|[\"']")  # one command line holds steps; each must start with the command to count
-_THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?"  # PowerShell's `; if ($?) { ... }` runs it too
+_THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?(?:[A-Za-z_]\w*=\S*\s+)*"  # PowerShell's `if ($?) {`, bash's `NAME=1 cmd`
 _FLAGS = r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*"  # a tool's own flags before its subcommand: gh -R acme/app pr ...
 _MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
 _NH = _THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)" + _FLAGS

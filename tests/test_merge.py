@@ -122,7 +122,7 @@ class Merge(unittest.TestCase):
         code, out = self.nh("merge", "--pr", "7", "--sha", self.head[:9], "--piece", "P1", "--release", "v1.2.3")
         self.assertEqual(code, 0, out)
         steps = [x.split(":")[0].split()[-1] for x in out.splitlines() if x.startswith("ok")]
-        self.assertEqual(steps, ["approve", "gate", "ci", "version", "merge", "same", "teardown", "piece", "tag"])
+        self.assertEqual(steps, ["approve", "gate", "ci", "version", "merge", "same", "piece", "tag", "teardown"])
         self.assertIn("Not done: no production deploy", out)
         self.assertEqual(self.pr["comments"][0]["body"], f"Approved by the owner: merge @ {self.head[:9]}")
         oid = self.pr["mergeCommit"]["oid"]
@@ -132,10 +132,83 @@ class Merge(unittest.TestCase):
         self.assertEqual(sh(self.app, "ls-remote", "--heads", "origin", "feat-a"), "")
         row = work.pieces(work.Repo(__import__("wk").settings.load(self.settings), "app"), "reports")[0]
         self.assertEqual((row["state"], row["approved"]), ("merged", self.head[:9]))
-        # a second run finds the PR merged and stops before posting anything again
-        code, out = self.nh("merge", "--pr", "7", "--sha", self.head[:9])
+        # a second run finds the PR merged at the approved code and finishes again, changing nothing
+        code, out = self.nh("merge", "--pr", "7", "--sha", self.head[:9], "--piece", "P1", "--release", "v1.2.3")
+        self.assertEqual(code, 0, out)
+        self.assertIn("is already merged", out)
+        self.assertIn("(it was already there)", out)
+        self.assertIn("feat-a was already gone here and on origin", out)
+        self.assertEqual(len(self.pr["comments"]), 1)
+        self.assertEqual(sum(a[:2] == ("pr", "merge") for a in self.calls), 1)
+
+    def test_a_rerun_after_a_stop_after_the_merge_resumes_and_finishes(self):
+        self.settings.write_text(self.settings.read_text(encoding="utf-8").replace(
+            "release = []", 'release = ["command-center"]'), encoding="utf-8")
+
+        def down(v):
+            raise turns.Refused("the command center still shows 1.2.2")
+        with mock.patch.object(merge, "command_center", down):
+            code, out = self.nh("merge", "--pr", "7", "--sha", self.head, "--release", "v1.2.3")
         self.assertEqual(code, 1)
-        self.assertIn("is merged, not open", out)
+        self.assertIn("STOP  release:", out)
+        self.assertTrue(self.wt.exists())  # teardown comes after the release
+        with mock.patch.object(merge, "command_center", lambda v: f"shows {v}"):
+            code, out = self.nh("merge", "--pr", "7", "--sha", self.head, "--release", "v1.2.3")
+        self.assertEqual(code, 0, out)
+        self.assertIn("ok    tag: v1.2.3", out)
+        self.assertIn("ok    release: shows 1.2.3", out)
+        self.assertFalse(self.wt.exists())
+        self.assertEqual(sum(a[:2] == ("pr", "merge") for a in self.calls), 1)
+
+    def test_a_pr_merged_at_other_code_than_approved_stops(self):
+        self.pr |= {"state": "MERGED", "mergeCommit": {"oid": self.head}}
+        code, out = self.nh("merge", "--pr", "7", "--sha", "abcdef1")
+        self.assertEqual(code, 1)
+        self.assertIn("STOP  approve:", out)
+        self.assertIn("not at the approved abcdef1", out)
+
+    def test_run_from_the_prs_own_worktree_leaves_its_local_part_and_succeeds(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["--settings", str(self.settings), "--cwd", str(self.wt), "merge", "--pr", "7", "--sha",
+                             self.head])
+        said = out.getvalue() + err.getvalue()
+        self.assertEqual(code, 0, said)
+        self.assertIn("LEFT  teardown: nh merge ran inside", said)
+        self.assertIn("git worktree remove", said)
+        self.assertTrue(self.wt.exists())
+        self.assertEqual(sh(self.app, "ls-remote", "--heads", "origin", "feat-a"), "")
+
+    def test_a_branch_checked_out_in_the_main_checkout_is_left_with_the_command(self):
+        sh(self.app, "worktree", "remove", str(self.wt))
+        sh(self.app, "checkout", "-q", "feat-a")
+        code, out = self.nh("merge", "--pr", "7", "--sha", self.head)
+        self.assertEqual(code, 0, out)
+        self.assertIn("LEFT  teardown: feat-a is checked out in the repo's main checkout", out)
+        self.assertIn("git switch main", out)
+        self.assertEqual(sh(self.app, "branch", "--show-current"), "feat-a")  # never switched
+
+    def test_release_refuses_in_a_repo_whose_settings_name_no_release_steps(self):
+        self.settings.write_text(self.settings.read_text(encoding="utf-8").replace("release = []\n", ""),
+                                 encoding="utf-8")
+        code, out = self.nh("merge", "--pr", "7", "--sha", self.head, "--release", "v1.2.3")
+        self.assertNotEqual(code, 0)
+        self.assertIn("A pushed tag can trigger a deploy", out)
+        self.assertEqual(self.calls, [])
+
+    def test_the_version_is_read_from_its_field_not_any_quoted_match(self):
+        self.assertEqual(merge.version_in("wk/__init__.py", 'OLD = "1.2.3"\n__version__ = "1.2.4"\n'), "1.2.4")
+        self.assertEqual(merge.version_in("package.json", '{"name": "1.2.3", "version": "2.0.0"}'), "2.0.0")
+        self.assertEqual(merge.version_in("pyproject.toml", 'name = "1.2.3"\nversion = "3.1.0"\n'), "3.1.0")
+        self.assertEqual(merge.version_in("VERSION", "1.2.3\n"), "1.2.3")
+
+    def test_a_carried_over_yes_already_on_the_pr_is_not_posted_again(self):
+        old = "abcdef1"
+        self.pr["comments"] = [{"body": f"Approved by the owner: merge @ {old}"}, {"body": merge._carried(old, self.head)}]
+        with mock.patch.object(turns, "gate_fresh", lambda *a: {"head": self.head[:12]}):
+            code, out = self.nh("merge", "--pr", "7", "--sha", old)
+        self.assertEqual(code, 0, out)
+        self.assertFalse(any(a[:2] == ("pr", "comment") for a in self.calls))
 
     def test_gate_refusal_stops_before_the_merge(self):
         commit(self.app, "code.py", "print('main')\n")
@@ -181,6 +254,7 @@ class Merge(unittest.TestCase):
         code, out = self.nh("merge", "--pr", "7", "--sha", self.head)
         self.assertEqual(code, 1)
         self.assertIn("ok    merge:", out)
+        self.assertIn("ok    same:", out)
         self.assertIn("STOP  teardown: feat-a has commits that aren't in origin/main", out)
         self.assertTrue(self.wt.exists())
         self.assertEqual(sh(self.app, "branch", "--list", "feat-a").strip(" *+"), "feat-a")
@@ -222,6 +296,15 @@ class Guard(unittest.TestCase):
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertIn("nh merge --pr N --sha S", decision["permissionDecisionReason"])
         self.assertIn("deny\tcd x && gh pr merge 7 --merge", (self.tmp / "merge-guard.log").read_text(encoding="utf-8"))
+
+    def test_a_raw_merge_with_gh_flags_or_in_powershell_is_refused_but_its_words_in_text_are_not(self):
+        for command in ("gh -R acme/app pr merge 14 --merge", "gh --repo acme/app pr merge 14",
+                        "cd app; if ($?) { gh pr merge 14 }", "FOO=1 gh pr merge 14"):
+            self.assertIn('"deny"', self.run_hook(command, self.sup), command)
+        self.assertIn('"deny"', self.run_hook("gh pr merge 14", self.sup, tool_name="PowerShell"))
+        for command in ('grep -n "gh pr merge" skills/supervisor/merge.md', 'git commit -m "use gh pr merge less"',
+                        "echo 'gh pr merge 7'", "gh pr merge --help"):
+            self.assertEqual(self.run_hook(command, self.sup), "", command)
 
     def test_everything_else_is_let_through(self):
         self.assertEqual(self.run_hook("gh pr merge 7 --merge", self.other), "")  # not a supervisor

@@ -9,15 +9,19 @@ so a skipped gate or a merge at the wrong commit can't happen:
     version   with --release vX.Y.Z: the repo's version file says X.Y.Z at S
     merge     gh pr merge N --merge --match-head-commit <head> (never squash or rebase)
     same      the merge commit's second parent is that head, and every file the PR changes is exactly as approved
-    teardown  the PR branch's worktree removed (if any); git branch -d after an ancestor check (never -D); the remote
-              branch deleted, confirmed with ls-remote
     piece     with --piece P3: the piece set to merged, approved at S
     tag       with --release: tag vX.Y.Z on the merge commit (by its id, never HEAD) and push the tag
     release   with --release: the repo's release steps: [repos.<name>] release = ["update", "command-center"]
               (update: nh update on this laptop; command-center: wait up to 2 minutes for the command center on port
-              8765 to show the new version). The kit's own repo gets both when its settings name none.
+              8765 to show the new version; [] tags only). The kit's own repo gets both when its settings name none;
+              any other repo must name them, since a pushed tag can trigger a deploy.
+    teardown  the PR branch's worktree removed (if any); git branch -d after an ancestor check (never -D); the remote
+              branch deleted, confirmed with ls-remote. A branch checked out in the main checkout, or in the worktree
+              nh merge runs from, keeps its local part: a LEFT line says what to run, and the run still succeeds.
 
---dry-run prints the steps it would run, and does none of them. nh merge never deploys to production.
+A PR already merged at S (a re-run after a stop) skips approve, gate, ci and merge and resumes; every step after the
+merge is safe to repeat. --dry-run prints the steps it would run, and does none of them. nh merge never deploys to
+production.
 """
 
 from __future__ import annotations
@@ -62,7 +66,11 @@ def release_steps(s: dict, top: Path) -> list[str]:
             mine = kit is not None and kit.is_dir() and core.same_path(core.git_common_dir(kit), core.git_common_dir(top))
         except KitError:
             mine = False
-        return list(KIT_RELEASE) if mine else []
+        if mine:
+            return list(KIT_RELEASE)
+        raise KitError("--release needs the repo's release steps in its settings: [repos.<name>] release = "
+                       "[\"update\", \"command-center\"], or release = [] to tag only. A pushed tag can trigger a "
+                       "deploy, so nh merge tags only a repo whose settings say how it releases")
     if not isinstance(steps, list) or any(x not in RELEASE_STEPS for x in steps):
         raise KitError(f"release in the repo's settings must be a list of {', '.join(sorted(RELEASE_STEPS))}")
     return steps
@@ -113,14 +121,14 @@ def plan(pr: int, sha: str, piece: str, release: str, steps: list[str]) -> list[
     if release:
         out.append(f"version: the version file says {release[1:]} at {sha}; stop if not")
     out += [f"merge: gh pr merge {pr} --merge --match-head-commit <that head>",
-            "same: the merge commit's second parent is that head, and the PR's files are exactly as approved",
-            "teardown: remove the branch's worktree, git branch -d after an ancestor check, delete the remote branch "
-            "and confirm with ls-remote"]
+            "same: the merge commit's second parent is that head, and the PR's files are exactly as approved"]
     if piece:
         out.append(f"piece: set {piece} to merged, approved at {sha}")
     if release:
         out.append(f"tag: git tag {release} <merge commit>; git push origin {release}")
-        out += [f"release: {x}" for x in steps] or ["release: no release steps in the repo's settings"]
+        out += [f"release: {x}" for x in steps] or ["release: none (the repo's settings say release = [])"]
+    out.append("teardown: remove the branch's worktree, git branch -d after an ancestor check, delete the remote "
+               "branch and confirm with ls-remote")
     return out + ["never: no production deploy"]
 
 
@@ -155,7 +163,8 @@ def _find_piece(s: dict, top: Path, pid: str, pr: int, product: str) -> tuple:
 def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str = "", product: str = "",
           dry_run: bool = False, where_settings: Path | None = None) -> str:
     """Run the sequence; returns the lines printed. Refused (exit 1) at the first failing step, with every line so
-    far."""
+    far. A PR already merged at the approved code resumes after the merge, so a re-run finishes what a stopped run
+    left; every step after the merge is safe to run twice."""
     top = core.checkout_of(cwd)[0]
     sha = (sha or "").lower()
     if len(sha) < 7 or not re.fullmatch(r"[0-9a-f]+", sha):
@@ -169,51 +178,60 @@ def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str =
     run = Run()
     data = _view(top, pr)
     where = "/".join((data.get("url") or "").split("/")[3:5]) or core.posix(top)
-    if data.get("state") != "OPEN":
-        run.stop("approve", f"{where} PR #{pr} is {(data.get('state') or 'unknown').lower()}, not open")
-
-    line = APPROVAL.format(who=settings.APPROVER, sha=sha)
-    if any(line.casefold() in (c.get("body") or "").casefold() for c in data.get("comments") or []):
-        run.ok("approve", f"'{line}' is already on PR #{pr}")
-    else:
-        turns._gh(top, "pr", "comment", str(pr), "--body", line)
-        run.ok("approve", f"posted '{line}' on PR #{pr}")
-
-    try:
-        gate = turns.gate_fresh(top, s, pr, sha)
-    except KitError as exc:
-        run.stop("gate", str(exc))
-    head = str(gate.get("head", ""))
-    run.ok("gate", "passed: " + json.dumps(gate))
-    data = _view(top, pr)
+    state = data.get("state")
     full = (data.get("headRefOid") or "").lower()
-    if not full.startswith(head):
-        run.stop("ci", f"PR #{pr}'s head moved to {full[:12]} after the gate passed {head}: run nh merge again")
-    why = turns.ci_green(data.get("statusCheckRollup") or [])
-    if why:
-        run.stop("ci", f"not green on {full[:12]}: {why}")
-    run.ok("ci", f"green on {full[:12]}")
-    if not full.startswith(sha):
-        turns._gh(top, "pr", "comment", str(pr), "--body",
-                  f"Approved by {settings.APPROVER} @ {sha}, carried over to {full[:12]} (clean main merge, CI green)")
+    if state == "MERGED":
+        if not (full.startswith(sha) or _said(data, _carried(sha, full))):
+            run.stop("approve", f"{where} PR #{pr} was merged at {full[:12] or 'an unknown head'}, not at the approved "
+                                f"{sha} (nor carried over to it): look on GitHub before anything else")
+        run.ok("approve", f"PR #{pr} is already merged at {full[:12]}: approve, gate and ci are behind it; resuming")
+    elif state != "OPEN":
+        run.stop("approve", f"{where} PR #{pr} is {(state or 'unknown').lower()}, not open")
+    else:
+        line = APPROVAL.format(who=settings.APPROVER, sha=sha)
+        if _said(data, line):
+            run.ok("approve", f"'{line}' is already on PR #{pr}")
+        else:
+            turns._gh(top, "pr", "comment", str(pr), "--body", line)
+            run.ok("approve", f"posted '{line}' on PR #{pr}")
+        try:
+            gate = turns.gate_fresh(top, s, pr, sha)
+        except KitError as exc:
+            run.stop("gate", str(exc))
+        head = str(gate.get("head", ""))
+        run.ok("gate", "passed: " + json.dumps(gate))
+        data = _view(top, pr)
+        full = (data.get("headRefOid") or "").lower()
+        if not full.startswith(head):
+            run.stop("ci", f"PR #{pr}'s head moved to {full[:12]} after the gate passed {head}: run nh merge again")
+        why = turns.ci_green(data.get("statusCheckRollup") or [])
+        if why:
+            run.stop("ci", f"not green on {full[:12]}: {why}")
+        run.ok("ci", f"green on {full[:12]}")
+        if not full.startswith(sha) and not _said(data, _carried(sha, full)):
+            turns._gh(top, "pr", "comment", str(pr), "--body", _carried(sha, full))
 
     if release:
         path, text = version_at(top, sha, settings.info_of(s, top)[1])
-        number = release[1:]
-        if not re.search(rf"""["']{re.escape(number)}["']|^{re.escape(number)}\s*$""", text, re.M):
-            run.stop("version", f"{path} at {sha[:12]} doesn't say {number}")
+        number, said = release[1:], version_in(path, text)
+        if said != number:
+            run.stop("version", f"{path} at {sha[:12]} says {said or 'no version'}, not {number}")
         run.ok("version", f"{path} says {number} at {sha[:12]}")
 
-    try:
-        turns._gh(top, "pr", "merge", str(pr), "--merge", "--match-head-commit", full)
-    except KitError as exc:
-        run.stop("merge", str(exc))
-    after = _view(top, pr)
+    if state == "MERGED":
+        after = data
+    else:
+        try:
+            turns._gh(top, "pr", "merge", str(pr), "--merge", "--match-head-commit", full)
+        except KitError as exc:
+            run.stop("merge", str(exc))
+        after = _view(top, pr)
     commit = ((after.get("mergeCommit") or {}).get("oid") or "").lower()
     if after.get("state") != "MERGED" or not commit:
         run.stop("merge", f"PR #{pr} is {(after.get('state') or 'unknown').lower()} with no merge commit after gh pr "
                           "merge: look on GitHub before anything else")
-    run.ok("merge", f"PR #{pr} merged at {full[:12]} as {commit[:12]}")
+    run.ok("merge", f"PR #{pr} merged at {full[:12]} as {commit[:12]}" + (" (before this run)" if state == "MERGED"
+                                                                         else ""))
 
     base = data.get("baseRefName") or settings.base_of(s, top)
     core.git(top, "fetch", "--quiet", "origin", timeout=core.WRITE_TIMEOUT)
@@ -227,12 +245,6 @@ def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str =
         run.stop("same", f"git diff {full[:12]} {commit[:12]} is not empty on the PR's files: look before anything "
                          "else")
     run.ok("same", f"git diff {full[:12]} {commit[:12]} is empty on the PR's {len(files)} file(s)")
-
-    branch = data.get("headRefName") or ""
-    try:
-        run.ok("teardown", _teardown(top, branch, base))
-    except KitError as exc:
-        run.stop("teardown", str(exc))
 
     if piece:
         from . import work
@@ -254,40 +266,84 @@ def merge(cwd: Path, s: dict, pr: int, sha: str, piece: str = "", release: str =
             core.git(top, "push", "--quiet", "origin", f"refs/tags/{release}", timeout=core.WRITE_TIMEOUT)
         except KitError as exc:
             run.stop("tag", str(exc))
-        run.ok("tag", f"{release} on {commit[:12]}, pushed")
+        run.ok("tag", f"{release} on {commit[:12]}, pushed" + (" (it was already there)" if have else ""))
         for step in steps:
             try:
                 run.ok("release", _release(step, release[1:], where_settings))
             except (KitError, OSError) as exc:
                 run.stop("release", f"{step}: {exc}")
+
+    branch = data.get("headRefName") or ""
+    try:
+        said, left = _teardown(top, branch, base, core.checkout_of(cwd)[0])
+    except KitError as exc:
+        run.stop("teardown", str(exc))
+    run.ok("teardown", said)
+    if left:
+        run.lines.append(f"LEFT  teardown: {left}")
     return "\n".join(run.lines + ["Not done: no production deploy (nh merge never deploys)."])
 
 
-def _teardown(top: Path, branch: str, base: str) -> str:
+def _said(data: dict, line: str) -> bool:
+    """The PR already carries this comment."""
+    return any(line.casefold() in (c.get("body") or "").casefold() for c in data.get("comments") or [])
+
+
+def _carried(sha: str, head: str) -> str:
+    return f"Approved by {settings.APPROVER} @ {sha}, carried over to {head[:12]} (clean main merge, CI green)"
+
+
+def version_in(path: str, text: str) -> str:
+    """The version a version file states: __version__ in a .py, "version" in a .json, version = in a .toml, else
+    the whole file."""
+    name = path.rsplit("/", 1)[-1]
+    if name.endswith(".json"):
+        try:
+            found = json.loads(text).get("version")
+        except (ValueError, AttributeError):
+            found = None
+        return str(found or "")
+    pattern = {"py": r"^__version__\s*=\s*[\"']([^\"']+)[\"']",
+               "toml": r"^version\s*=\s*[\"']([^\"']+)[\"']"}.get(name.rsplit(".", 1)[-1] if "." in name else "")
+    if pattern:
+        m = re.search(pattern, text, re.M)
+        return m.group(1) if m else ""
+    return text.strip()
+
+
+def _teardown(top: Path, branch: str, base: str, here: Path) -> tuple[str, str]:
+    """(what was torn down, what is left for the supervisor to finish, with the commands). A branch checked out in
+    the main checkout, or in the worktree nh merge runs from, keeps its local part; the run still succeeds."""
     if not branch or branch == base:
         raise Refused(f"the PR's branch is '{branch or 'unknown'}', so there is nothing safe to delete")
-    said = []
+    said, left = [], ""
     tree, main = worktree_of(top, branch)
     if tree is not None and main:
-        raise Refused(f"{branch} is checked out in the repo's main checkout, which nh merge never touches: switch it "
-                      "there yourself, then delete the branch")
-    tip = core.git(top, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False)
-    if tip and core.run(["git", "-C", str(top), "merge-base", "--is-ancestor", tip, f"origin/{base}"]).returncode:
-        raise Refused(f"{branch} has commits that aren't in origin/{base}: kept, with its worktree (no git branch -D)")
-    if tree is not None:
-        if core.git(tree, "status", "--porcelain"):
-            raise Refused(f"{core.posix(tree)} has uncommitted changes: kept, with its branch")
-        core.git(top, "worktree", "remove", str(tree))
-        said.append(f"removed worktree {core.posix(tree)}")
-    if tip:
-        core.git(top, "branch", "-d", branch)
-        said.append(f"git branch -d {branch}")
+        left = (f"{branch} is checked out in the repo's main checkout {core.posix(tree)}, which nh merge never "
+                f"switches: there, run git switch {base}, then git branch -d {branch}")
+    elif tree is not None and core.same_path(tree, here):
+        left = (f"nh merge ran inside {core.posix(tree)}, the PR's own worktree, so it can't remove it: from the main "
+                f"checkout, run git worktree remove {core.posix(tree)}, then git branch -d {branch}")
+    if not left:
+        tip = core.git(top, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False)
+        if tip and core.run(["git", "-C", str(top), "merge-base", "--is-ancestor", tip, f"origin/{base}"]).returncode:
+            raise Refused(f"{branch} has commits that aren't in origin/{base}: kept, with its worktree "
+                          "(no git branch -D)")
+        if tree is not None:
+            if core.git(tree, "status", "--porcelain"):
+                raise Refused(f"{core.posix(tree)} has uncommitted changes: kept, with its branch")
+            core.git(top, "worktree", "remove", str(tree))
+            said.append(f"removed worktree {core.posix(tree)}")
+        if tip:
+            core.git(top, "branch", "-d", branch)
+            said.append(f"git branch -d {branch}")
     if core.git(top, "ls-remote", "--heads", "origin", branch, timeout=core.WRITE_TIMEOUT):
         core.git(top, "push", "--quiet", "origin", "--delete", branch, timeout=core.WRITE_TIMEOUT)
         if core.git(top, "ls-remote", "--heads", "origin", branch, timeout=core.WRITE_TIMEOUT):
             raise Refused(f"origin still has {branch} after deleting it")
         said.append(f"deleted origin/{branch} (ls-remote shows none)")
-    return "; ".join(said) or f"{branch} was already gone here and on origin"
+    gone = "local part left (below)" if left else "already gone here"
+    return "; ".join(said) or f"{branch} was {gone} and on origin", left
 
 
 def _release(step: str, version: str, where: Path) -> str:
@@ -300,7 +356,6 @@ def _release(step: str, version: str, where: Path) -> str:
 
 # ---------------------------------------------------------------- the PreToolUse hook: no raw merge in a supervisor chat
 
-RAW_MERGE = re.compile(r"(?<![\w-])gh(?:\.exe)?\s+pr\s+merge\b", re.I)
 ESCAPE = "NH_RAW_MERGE"  # written in the command itself (NH_RAW_MERGE=1 gh pr merge ...): let through, and logged
 _ESCAPED = re.compile(ESCAPE + r"""\s*=\s*['"]?1""")
 REFUSAL = ("A raw gh pr merge skips the merge sequence (approval, freshness gate, green CI, tear-down). Use "
@@ -312,12 +367,13 @@ REFUSAL = ("A raw gh pr merge skips the merge sequence (approval, freshness gate
 def guard(hook: dict) -> tuple[str, str]:
     """(decision, the command's first line): "deny" for a Bash or PowerShell call that runs gh pr merge in a chat
     that loaded the supervisor skill; "escaped" for one carrying NH_RAW_MERGE=1; "" for everything else (builders and
-    other subagents, chats that aren't supervisors, every other command)."""
-    from . import reply
+    other subagents, chats that aren't supervisors, every other command). A step counts only when it runs gh pr merge
+    itself, as nh audit measure reads it: never the words inside a grep, an echo or a commit message."""
+    from . import audit, reply
     if hook.get("agent_id") or hook.get("tool_name") not in ("Bash", "PowerShell"):
         return "", ""
     command = str((hook.get("tool_input") or {}).get("command") or "")
-    if not RAW_MERGE.search(command):
+    if not any(kind == "merge" for kind, _ in audit.steps(command)):
         return "", ""
     transcript = Path(str(hook.get("transcript_path") or ""))
     if not (hook.get("transcript_path") and transcript.is_file() and reply.is_supervisor(transcript)):

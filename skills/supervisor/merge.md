@@ -23,14 +23,17 @@ From the PR's repo, run `nh merge --pr <N> --sha <approved sha>` (add `--piece P
 2. Runs `nh gate fresh` at that sha and prints its verdict: main changed none of the PR's files since its branch last took main (`.work/` never counts), the four sections, and private names on public repos. It carries the yes over to a new head only after clean merges of main with CI green, and posts that. If it refuses on main, refresh as above, then run `nh merge` again; ask the owner again only when it says a new yes is needed.
 3. Requires every CI check on that head to have completed green (skipped or cancelled is not green).
 4. `gh pr merge --merge --match-head-commit <head>` (never squash or rebase), then confirms the merge commit holds exactly the approved files.
-5. Tears down: the PR branch's worktree, `git branch -d` after an ancestor check (never `-D`), the remote branch, confirmed with `ls-remote`.
+5. With `--piece` and `--release`, sets the piece merged, then tags and releases (below).
+6. Tears down last: the PR branch's worktree, `git branch -d` after an ancestor check (never `-D`), the remote branch, confirmed with `ls-remote`. A branch checked out in the main checkout or in the worktree you run from keeps its local part: a `LEFT` line gives the commands, and the run still succeeds.
+
+If a run stops after the merge, fix what it names and run the same `nh merge` again: it finds the PR merged at the approved code and finishes the remaining steps.
 
 Where green CI isn't the proof (no CI, CI that can't run, or a PR that changes the CI itself: `.github/workflows/`, or anything the CI runs to decide what it tests), the **full run** must pass on that exact version, in the builder's worktree or a fresh one at that commit, and the owner's yes must name it. Never switch the repo's main checkout: other supervisors record their work there.
 
 A stacked PR GitHub calls CONFLICTING while git merges it cleanly: merge main into the PR, check its code is identical to the approved sha (`git diff --quiet <sha> <new head> -- . ":!.work"`), post that on the PR, and once CI is green on the new head, `nh merge` it without a new yes.
 
 ## Releasing
-Production gets only what is merged, from main, with its own yes; `nh merge` never deploys. A repo that releases by tag (this kit) releases with `nh merge ... --release vX.Y.Z`: it checks the version file says X.Y.Z at the sha, tags the merge commit by its id (never HEAD), pushes the tag and runs the repo's release steps (for the kit: `nh update`, then waits up to 2 minutes for the command center to show the new version).
+Production gets only what is merged, from main, with its own yes; `nh merge` never deploys. A repo that releases by tag (this kit) releases with `nh merge ... --release vX.Y.Z`: it checks the version file says X.Y.Z at the sha, tags the merge commit by its id (never HEAD), pushes the tag and runs the repo's release steps (for the kit: `nh update`, then waits up to 2 minutes for the command center to show the new version). Any other repo needs `release = [...]` in its settings first (`[]` tags only), since a pushed tag can trigger a deploy.
 
 ## Tearing down a piece that ends without a merge
 **A piece that ends `done` with a builder** (its outcome is in the note): `git fetch origin`, then check each of the builder's branches, whatever its name (including `worktree-agent-<id>`), has no commits outside the base branch (`git rev-list --count origin/<base>..<branch>` prints 0). If any has, keep its PR and branches and ask the owner before deleting them, as a numbered Needs you item. If none has, close its PR if any, then `git worktree remove <worktree>`, `git branch -d <branch>` (and the worktree's own base branch, also `-d`), and `git push origin --delete <branch>` where a remote copy exists; confirm `git ls-remote --heads origin <branch>` prints nothing.

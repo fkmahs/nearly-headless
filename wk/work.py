@@ -1016,6 +1016,9 @@ def browser_set(r: Repo, product: str, site: str, browser: str, account: str = "
     path, host, browser, account = r.product(product) / BROWSERS, site_host(site), _clean(browser), _clean(account)
     if not browser:
         raise KitError("Name the browser as the browser tools show it, e.g. \"Chrome (work)\"")
+    if re.search(r"[^\s@]+@[^\s@]+\.\w", account):
+        raise KitError("The account label goes in the list's files and the chat's context: use a role or a short "
+                       "label (e.g. \"the controller\", \"work\"), not an email address")
 
     def edit():
         rows = [x for x in _read_tsv(path, BROWSER_COLUMNS) if x["site"] != host]
