@@ -103,11 +103,14 @@ def own_calls(transcript: Path) -> int:
         nonlocal calls, started, other
         if d.get("isSidechain"):
             return False
-        if other:  # read backwards, so this entry came just before another's message
+        blocks = _blocks(d)
+        if other:  # read backwards: this entry came before another's message
             if _ended(d):
                 return True  # that message started the turn
+            if not (d.get("type") == "assistant" or _owner_said(d, blocks) is not None
+                    or any(b.get("type") == "tool_result" for b in blocks)):
+                return False  # attachments, queue and hook lines between a stop and the message say nothing
             other = False
-        blocks = _blocks(d)
         if d.get("type") == "assistant":
             started = True
             calls += sum(b.get("type") == "tool_use" and str(b.get("name", "")) not in _NOT_OWN

@@ -142,11 +142,18 @@ class ReplyCheck(unittest.TestCase):
         self.assertIn("used 60 of your own tool calls", self.remind(hook))  # 30 + 30 across a hand-back
         path.write_text("\n".join(body[:-2] + [ended, note, *calls] + body[-2:]) + "\n", encoding="utf-8")
         self.assertEqual(self.remind(hook), "")  # the turn had stopped: the hand-back's own turn made 30
+        between = [json.dumps({"type": "attachment", "isSidechain": False}),
+                   json.dumps({"type": "queue-operation", "isSidechain": False}),
+                   json.dumps({"type": "system", "subtype": "stop_hook_summary_x", "isSidechain": False}),
+                   line("user", "hook said hi", isMeta=True)]
+        path.write_text("\n".join(body[:-2] + [ended, *between, note, *calls] + body[-2:]) + "\n", encoding="utf-8")
+        self.assertEqual(self.remind(hook), "")  # entries between the stop and the hand-back change nothing
 
     def test_an_unreadable_transcript_keeps_the_parts_line(self):
         hook = self.turn_of(41, skill_call("supervisor"))
         path = Path(hook["transcript_path"])
-        path.write_bytes(path.read_bytes() + b'{"type": "assistant", "message": "\xff\xfe half')  # half-written
+        path.write_bytes(b'{"type": "user", "message": "\xff\xfe bad"}\n' + path.read_bytes()
+                         + b'{"type": "assistant", "message": "\xff\xfe half')  # bytes no strict decode reads
         self.assertIn("used 41 of your own tool calls", self.remind(hook))
         from wk import reply
         with mock.patch.object(reply, "own_calls", side_effect=OSError("locked")):
