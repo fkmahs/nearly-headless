@@ -29,6 +29,13 @@ owner's earlier turn isn't counted again; one that arrives while the owner's tur
 
 `nh reply-check --remind` is its UserPromptSubmit hook: before each turn it prints one short line naming those parts,
 so a reply is written right the first time; nothing when none are set. The Stop hook stays the safety net.
+
+The same reminder adds one line, once, after a supervisor turn that used more than 40 of its own tool calls (agents,
+ToolSearch, SendMessage and the app's plan and wrap-up tools don't count), naming the count and the small-check rule.
+It never holds a turn back. Set the number, or 0 to turn it off:
+
+    [reply]
+    long_turn = 40
 """
 
 from __future__ import annotations
@@ -54,15 +61,71 @@ def records(s: dict) -> bool:
     return not (isinstance(reply, dict) and reply.get("record") is False)  # on unless turned off
 
 
-def remind(s: dict) -> str:
-    """One short line naming the required parts, or "" when none are set."""
+LONG_TURN = 40  # a supervisor's own tool calls in one turn; healthy supervisors' 90th percentile is about 23-34
+_NOT_OWN = ("Agent", "Task", "ToolSearch", "SendMessage")  # handing work off, or loading tools, is not doing it
+_APP = re.compile(r"__(?:update_plan|wrap_up)$")
+
+
+def long_turn(s: dict) -> int:
+    reply = s.get("reply") if isinstance(s, dict) else None
+    n = reply.get("long_turn") if isinstance(reply, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else LONG_TURN
+
+
+def remind(s: dict, hook: dict | None = None) -> str:
+    """One short line naming the required parts, or "" when none are set; then, when the chat's last turn was a
+    supervisor's that used more than long_turn of its own tool calls, one line naming the count and the rule."""
     marks = required(s)
-    return ("If you are a supervisor, your closing message must include: " + ", ".join(f'"{m}"' for m in marks)
-            + ".") if marks else ""
+    lines = ["If you are a supervisor, your closing message must include: " + ", ".join(f'"{m}"' for m in marks)
+             + "."] if marks else []
+    limit, hook = long_turn(s), hook or {}
+    transcript = Path(str(hook.get("transcript_path") or ""))
+    try:  # a transcript that can't be read loses only this line, never the one above
+        long = limit and not hook.get("agent_id") and hook.get("transcript_path") and transcript.is_file() \
+            and (n := own_calls(transcript)) > limit and is_supervisor(transcript)
+    except Exception:  # noqa: BLE001 - a reminder must never fail
+        long = False
+    if long:
+        lines.append(f"Your last turn used {n} of your own tool calls (over {limit}). A check stays with you when it "
+                     "takes a handful of steps; a reconciliation, a run over many records, a production run or more "
+                     "than a few pages of browser work goes to a fresh small agent, which returns only its conclusion.")
+    return "\n".join(lines)
+
+
+def own_calls(transcript: Path) -> int:
+    """The tool calls this chat made itself in its last turn: since the last message that started one (the owner's,
+    another chat's, an agent's hand-back), skipping the prompt just sent if it is already written. Another's message
+    starts a turn only once the one before it ended (as support() reads it); one arriving mid-turn stays part of it.
+    Subagents' calls, handing work to agents, loading tools and the app's plan and wrap-up tools don't count."""
+    calls, started, other = 0, False, False  # other: an earlier entry was another's message, maybe this turn's start
+
+    def stop(d):
+        nonlocal calls, started, other
+        if d.get("isSidechain"):
+            return False
+        blocks = _blocks(d)
+        if other:  # read backwards: this entry came before another's message
+            if _ended(d):
+                return True  # that message started the turn
+            if not (d.get("type") == "assistant" or _owner_said(d, blocks) is not None
+                    or any(b.get("type") == "tool_result" for b in blocks)):
+                return False  # attachments, queue and hook lines between a stop and the message say nothing
+            other = False
+        if d.get("type") == "assistant":
+            started = True
+            calls += sum(b.get("type") == "tool_use" and str(b.get("name", "")) not in _NOT_OWN
+                         and not _APP.search(str(b.get("name", ""))) for b in blocks)
+        elif _owner_said(d, blocks) is not None:
+            return started  # the turn's first message; one after the last reply is the prompt being sent
+        elif started and _other(d, blocks):
+            other = True
+        return False
+    _read_back(transcript, stop)
+    return calls
 
 
 def _entries(transcript: Path):
-    with transcript.open(encoding="utf-8") as f:
+    with transcript.open(encoding="utf-8", errors="replace") as f:  # a half-written last line never stops a read
         for line in f:
             try:
                 d = json.loads(line)

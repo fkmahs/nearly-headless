@@ -16,8 +16,8 @@ The brief, sized to the piece:
 
 ## Not builder work
 Any agent starts at tens of thousands of tokens, and a builder adds a worktree, a PR and tests. Only a code change that ends in a PR gets one. Everything else, cheapest first:
-- **Yourself:** a lookup of a few commands, a data check, a question a few read-only queries answer. Where a repo's AGENTS.md names a read-only query tool (a client repo's API query tool, for example), query first; the browser is only for what users see.
-- **A fresh small agent**, short query-first brief, no worktree, no sandbox tests, no browser except for an approved write itself: a longer data check, an investigation, a data fix the owner already approved. Its written finding goes in the piece's note.
+- **Yourself:** a check that takes a handful of steps: a lookup, a question a few read-only queries answer. Where a repo's AGENTS.md names a read-only query tool (a client repo's API query tool, for example), query first; the browser is only for what users see.
+- **A fresh small agent**, short query-first brief, no worktree, no sandbox tests, no browser except for an approved write itself: a reconciliation, a run over many records, a production run, an investigation, more than a few pages of browser work, a data fix the owner already approved. It returns only its conclusion; that goes in the piece's note.
 - **A scope change mid-run:** stop the agent and start a fresh one with the new short brief. Never resume it with a re-brief: a resumed agent re-reads its whole old context on every call.
 - **A small follow-up** (a check, a question, a tweak outside the PR's fixes): a fresh agent with a short brief, never the finished one resumed. Message a builder only to continue its own PR: review fixes, or a refresh `nh refresh` can't do. A builder that can't be woken: start a fresh one from the PR and the note.
 

@@ -97,7 +97,7 @@ Setup adds a hook that checks each supervisor reply before it reaches you: if a 
 require = ["Since you wrote:"]
 ```
 
-A second hook (`UserPromptSubmit`, `nh reply-check --remind`) names those parts in one short line before each turn, so Claude gets the reply right the first time. Both read the same list; empty it to turn them off.
+A second hook (`UserPromptSubmit`, `nh reply-check --remind`) names those parts in one short line before each turn, so Claude gets the reply right the first time. Both read the same list; empty it to turn them off. After a supervisor turn that used more than 40 of its own tool calls, the same hook adds one line naming the count and the small-check rule (`long_turn = 40` under `[reply]`; 0 turns it off).
 
 Supervisors are also held to recording support work, unless you add `record = false` under `[reply]`: a turn that drafted a message for someone, investigated or reviewed a document for you, but recorded nothing on the list (`nh piece add`, or `nh piece note ... --add`), is sent back once to record it. Each check adds one line to `~/.nearly-headless/reply-check.log`.
 

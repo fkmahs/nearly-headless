@@ -1,3 +1,3 @@
 """nearly-headless: the orchestration layer. Run as `wk` (bin/) or `python -m wk`."""
 
-__version__ = "1.64.1"
+__version__ = "1.65.0"

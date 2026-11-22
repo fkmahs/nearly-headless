@@ -120,6 +120,8 @@ KINDS = {
     "main": ("Changes without a pull request", "Code reached the main branch without going through a pull request.",
              "owner"),
     "repo": ("Settings", "nearly-headless couldn't read this repo's settings.", "supervisor"),
+    "about": ("Lists without an about", "A supervised list says nowhere who the client is or what the work is for, so "
+              "its supervisor can't recall it after a compaction.", "supervisor"),
     "tests": ("Tests failing", "GitHub's tests failed on the main branch, or on a pull request waiting for your yes.",
               "supervisor"),
     "behind": ("Needs the latest main", "A pull request waiting for your yes lacks main's newest changes to files it "
@@ -677,6 +679,10 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
         all_rows[product] = rows
         if only is None or product == only:
             found += problems + _memory(s, name, product, str(products[product].get("supervisor") or ""))
+            if products[product].get("supervisor") and not products[product].get("about"):
+                found.append(_problem("about", name, product, "", "has a supervisor but no about",
+                                      f"write two or three plain lines with the owner: nh product set {name} "
+                                      f"{product} --about \"...\""))
     # hours that name no piece, or a piece the list doesn't have (the calls list books hours without pieces)
     cfg = _billing(top)
     calls = str((cfg or {}).get("calls_product") or "")

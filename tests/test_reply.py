@@ -130,6 +130,70 @@ class ReplyCheck(unittest.TestCase):
             self.assertEqual(self.remind(), "")
         self.assertEqual(self.logged(), [])  # the reminder logs nothing
 
+    def test_another_message_mid_turn_stays_part_of_it_and_after_a_stop_starts_a_new_one(self):
+        self.settings.write_text("", encoding="utf-8")
+        hook = self.turn_of(30, skill_call("supervisor"))
+        path = Path(hook["transcript_path"])
+        calls = [line("assistant", [{"type": "tool_use", "name": "Bash", "input": {}}])] * 30
+        note = line("user", "<task-notification>a builder handed back</task-notification>")
+        ended = json.dumps({"type": "system", "subtype": "turn_duration", "isSidechain": False})
+        body = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join(body[:-2] + [note, *calls] + body[-2:]) + "\n", encoding="utf-8")
+        self.assertIn("used 60 of your own tool calls", self.remind(hook))  # 30 + 30 across a hand-back
+        path.write_text("\n".join(body[:-2] + [ended, note, *calls] + body[-2:]) + "\n", encoding="utf-8")
+        self.assertEqual(self.remind(hook), "")  # the turn had stopped: the hand-back's own turn made 30
+        between = [json.dumps({"type": "attachment", "isSidechain": False}),
+                   json.dumps({"type": "queue-operation", "isSidechain": False}),
+                   json.dumps({"type": "system", "subtype": "stop_hook_summary_x", "isSidechain": False}),
+                   line("user", "hook said hi", isMeta=True)]
+        path.write_text("\n".join(body[:-2] + [ended, *between, note, *calls] + body[-2:]) + "\n", encoding="utf-8")
+        self.assertEqual(self.remind(hook), "")  # entries between the stop and the hand-back change nothing
+
+    def test_an_unreadable_transcript_keeps_the_parts_line(self):
+        hook = self.turn_of(41, skill_call("supervisor"))
+        path = Path(hook["transcript_path"])
+        path.write_bytes(b'{"type": "user", "message": "\xff\xfe bad"}\n' + path.read_bytes()
+                         + b'{"type": "assistant", "message": "\xff\xfe half')  # bytes no strict decode reads
+        self.assertIn("used 41 of your own tool calls", self.remind(hook))
+        from wk import reply
+        with mock.patch.object(reply, "own_calls", side_effect=OSError("locked")):
+            got = self.remind(hook)
+        self.assertIn('"Since you wrote:", "What would Pat do"', got)
+        self.assertNotIn("tool calls", got)
+
+    def turn_of(self, n, *start, side=0):
+        """A transcript whose last turn made n of its own tool calls (plus calls that don't count), then the prompt
+        being sent."""
+        path = self.tmp / "long.jsonl"
+        calls = [line("assistant", [{"type": "tool_use", "id": f"c{i}", "name": "Bash", "input": {}}]) for i in range(n)]
+        free = [line("assistant", [{"type": "tool_use", "id": f"f{i}", "name": x, "input": {}}])
+                for i, x in enumerate(("Agent", "Task", "ToolSearch", "SendMessage", "mcp__ccd_turn__update_plan",
+                                       "mcp__ccd_turn__wrap_up"))]
+        sub = [line("assistant", [{"type": "tool_use", "name": "Bash", "input": {}}], isSidechain=True)] * side
+        early = [line("assistant", [{"type": "tool_use", "name": "Bash", "input": {}}])] * 60  # an earlier turn
+        body = [*start, line("user", "first ask"), *early, line("user", "do the reconciliation"), *calls, *free, *sub,
+                line("assistant", [{"type": "text", "text": "done"}]), line("user", "next ask")]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        return {"hook_event_name": "UserPromptSubmit", "transcript_path": str(path)}
+
+    def test_a_long_supervisor_turn_adds_one_line_to_the_next_reminder(self):
+        self.settings.write_text("", encoding="utf-8")
+        got = self.remind(self.turn_of(41, skill_call("supervisor")))
+        self.assertEqual(got.count("\n"), 1)
+        self.assertIn("Your last turn used 41 of your own tool calls (over 40)", got)
+        self.assertIn("fresh small agent", got)
+        self.assertEqual(self.remind(self.turn_of(40, skill_call("supervisor"))), "")  # under: nothing
+        self.assertEqual(self.remind(self.turn_of(10, skill_call("supervisor"), side=50)), "")  # subagents' calls
+        self.assertEqual(self.remind(self.turn_of(41, skill_call("supervisor")) | {"agent_id": "a1"}), "")  # subagent
+        self.assertEqual(self.remind(self.turn_of(80, skill_call("builder"))), "")  # not a supervisor
+        self.settings.write_text(ON + "long_turn = 0\n", encoding="utf-8")  # turned off; the parts line stays
+        self.assertNotIn("tool calls", self.remind(self.turn_of(80, skill_call("supervisor"))))
+        self.settings.write_text(ON + "long_turn = 10\n", encoding="utf-8")
+        got = self.remind(self.turn_of(11, skill_call("supervisor")))
+        self.assertEqual(got.count("\n"), 2)
+        self.assertIn("used 11 of your own tool calls (over 10)", got)
+        self.assertEqual(self.logged(), [])
+
     def test_any_error_lets_the_reply_through(self):
         path = self.transcript(skill_call("supervisor"), reply="hi")
         self.assertIsNone(self.run_hook({}, raw="{not json"))
