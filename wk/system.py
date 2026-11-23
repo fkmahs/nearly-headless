@@ -54,6 +54,7 @@ HOOK_WORDS = {
     upkeep.RECALL: ("Claude compacts a long chat", "Gives a supervisor its list back after its memory shrinks"),
     upkeep.RECALL_CLEAR: ("You clear a chat", "Gives a supervisor its list back"),
     upkeep.REMIND: ("Before each turn", "Names the parts a supervisor's reply must have"),
+    upkeep.MERGE_GUARD: ("A supervisor runs a command", "Refuses a raw gh pr merge and points to nh merge"),
     upkeep.REPLY: ("A supervisor is about to reply", "Sends the reply back once if a required part is missing, or "
                                                      "if work done for you wasn't recorded on the list"),
 }

@@ -115,6 +115,7 @@ KINDS = {
                "nobody"),
     "hours": ("Hours", "Hours logged without saying which piece they were for.", "supervisor"),
     "billing": ("Billing", "The invoice needs the first day it covers.", "owner"),
+    "teardown": ("Not torn down", "A merged piece still has its branch or working folder.", "supervisor"),
     "git": ("Leftover branches", "Work left behind that no piece accounts for.", "owner"),
     "files": ("Files that shouldn't be on GitHub", "Files that don't belong in the repo are stored in it.", "supervisor"),
     "main": ("Changes without a pull request", "Code reached the main branch without going through a pull request.",
@@ -557,6 +558,16 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
         if is_open and x["branch"] and remote is not None and x["branch"] not in remote | facts["local"]:
             add("github", pid, f"records branch {x['branch']}, which exists neither on GitHub nor here",
                 f"{set_} {pid} --branch \"\"", {"piece": pid, "set": {"branch": ""}})
+        if st == "merged":  # merged means torn down: no branch here or on GitHub, no worktree
+            heads = {x["branch"]} | {(prs or {}).get(n, {}).get("headRefName") or "" for n in numbers}
+            for b in sorted(h for h in heads if h and h != facts["base"] and h not in KEEP):
+                left = [w for w, there in (("a worktree", b in facts["worktrees"]), ("a local branch", b in facts["local"]),
+                                           ("a branch on GitHub", remote is not None and b in remote)) if there]
+                if left:
+                    claimed.add(b)  # flagged here, not again as a leftover branch
+                    add("teardown", pid, f"is merged but {b} still has {', '.join(left)}",
+                        f"tear it down (merge.md): git worktree remove <its folder>; git branch -d {b}; git push "
+                        f"origin --delete {b}; then git ls-remote --heads origin {b} prints nothing")
         # state rules
         if st == "merged" and not numbers:
             add("state", pid, "is merged but has no PR", f"{set_} {pid} --state done")
@@ -629,10 +640,15 @@ def _pieces(name: str, product: str, r: work.Repo, facts: dict, today: date) -> 
             add("question", qid, "isn't tied to a piece yet",
                 f"nh question set {name} {product} {qid} --piece <the piece it is about> (or --list-wide when it "
                 f"is about the whole list)")
-        for n in _numbers(q.get("pr", "")) if prs is not None else []:
+        piece = by_id.get((q.get("piece") or "").upper())
+        # the PR it names, else its piece's PRs: a question about a merged or closed PR was answered or overtaken
+        about = _numbers(q.get("pr", ""))
+        if not about and piece and piece["state"] in work.OPEN and prs is not None:  # every PR of the piece ended
+            theirs = _numbers(piece["pr"])
+            about = theirs if theirs and all(n in prs and prs[n]["state"] != "OPEN" for n in theirs) else []
+        for n in about if prs is not None else []:
             if n in prs and prs[n]["state"] != "OPEN":
                 add("question", qid, f"is about PR #{n}, which is {prs[n]['state'].lower()}", f"close or restate it: {answer}")
-        piece = by_id.get((q.get("piece") or "").upper())
         if piece and piece["state"] not in work.OPEN:
             add("question", qid, f"is about {piece['id']}, which is {piece['state']}", f"close it: {answer}")
         if LEADING_PIECE.match(q["question"]):

@@ -58,14 +58,15 @@ Never relay a builder's report or back-and-forth raw; relay its inferred claims 
 **The command center** (`nh serve`) is how the owner sees the work: on start or resume, record your chat with `nh product set <repo> <product> --supervisor <link>` (in the Claude app, `claude://claude.ai/epitaxy/<session id>`).
 
 ## Signing in
-The owner keeps several browsers open, each signed in to different accounts.
-- **Once per site.** Check the other browsers only on a new sign-in page or lockout, once per site per chat; once a browser is found signed in to a site, keep using it for that site. Never list or select browsers before every action.
-- **Signed out in one browser isn't signed out.** On a sign-in page, a lockout or "not signed in" in Claude in Chrome, check the other connected browsers before asking the owner: `list_connected_browsers`, then `select_browser` each one in turn (first the one the repo's AGENTS.md or channels file names for that site), open the same site, and use the first one already signed in; also the built-in browser where the site was opened there. Never `switch_browser` for this: it asks the owner to click.
+The owner keeps several browsers open, each signed in to different accounts. Your list's browser map (`nh browser list <repo> <product>`; the start block's `Browsers` line) names the browser and account for each site.
+- **Use the browser the map names for that site**, without listing or selecting browsers before each action. **Before any write** (a form, a message, an email draft), check the signed-in account the page shows matches the map's; if not, stop and ask.
+- **Signed out in one browser isn't signed out.** For a site the map lacks, or on a sign-in page, a lockout or "not signed in" in Claude in Chrome, check the other connected browsers before asking the owner: `list_connected_browsers`, then `select_browser` each one in turn, open the same site, and use the first one already signed in; also the built-in browser where the site was opened there. Record it: `nh browser set <repo> <product> <site-host> "<browser display name>" --account "<the owner's label>"`. Never `switch_browser` for this: it asks the owner to click.
 - **Ask the owner only when the site is signed out in every one**, naming the site's host and the browsers checked (by their display names).
 - **Never type a password or code, sign out, or change the account or a setting**; act only as the task needs. Afterwards, go back to the browser the work was using where it matters.
 
 ## Merging and hours
-- **Merge only on the owner's yes given to you**, never a PR `nh gate fresh` refuses, and release to production only what is merged, from main, with its own yes: follow `merge.md`. Tear down after every merge without asking.
+- **Merge only on the owner's yes given to you, with `nh merge --pr N --sha S`** (it runs the gate, CI, merge and tear-down; a raw `gh pr merge` is refused), and release to production only what is merged, from main, with its own yes: follow `merge.md`, including what a yes covers.
+- **When the owner answers a question in chat**, run `nh question answer` in the same turn.
 - **Hours:** only what the owner states, per list, naming the pieces they pay for: `nh hours add <repo> <product> <h> --note "..." --for P3,P7`; fix a wrong unbilled entry with `nh hours fix`. Never estimate. Where the client has a project manager, book none: pass the hours to it by message. Keep your list's invoice line on the week's work: `nh product set <repo> <product> --line "..."`.
 
 ## In Claude's sidebar

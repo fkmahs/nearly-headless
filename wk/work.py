@@ -992,6 +992,66 @@ def status(s: dict, recent_days: int = 7) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------- the browser and account map
+
+BROWSERS = "browsers.tsv"  # .work/<product>/: which browser, signed in as which account, each site is used in
+BROWSER_COLUMNS = ["site", "browser", "account", "set"]
+BROWSERS_MAX = 300  # characters: the map's one line in nh recall
+
+
+def site_host(site: str) -> str:
+    """A site's host, however it was given: https://App.Example.com/path -> app.example.com."""
+    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", _clean(site).lower()).split("/")[0].split("?")[0].strip(".")
+    if not host or " " in host:
+        raise KitError(f"'{site}' is not a site's host (e.g. app.example.com)")
+    return host
+
+
+def browsers(r: Repo, product: str) -> list[dict]:
+    return _read_tsv(r.product(product) / BROWSERS, BROWSER_COLUMNS)
+
+
+def browser_set(r: Repo, product: str, site: str, browser: str, account: str = "") -> dict:
+    """Record (or change) the browser a site is used in, and the account label the owner chose for it."""
+    path, host, browser, account = r.product(product) / BROWSERS, site_host(site), _clean(browser), _clean(account)
+    if not browser:
+        raise KitError("Name the browser as the browser tools show it, e.g. \"Chrome (work)\"")
+    if re.search(r"[^\s@]+@[^\s@]+\.\w", account):
+        raise KitError("The account label goes in the list's files and the chat's context: use a role or a short "
+                       "label (e.g. \"the controller\", \"work\"), not an email address")
+
+    def edit():
+        rows = [x for x in _read_tsv(path, BROWSER_COLUMNS) if x["site"] != host]
+        rows.append({"site": host, "browser": browser, "account": account, "set": date.today().isoformat()})
+        _write_tsv(path, BROWSER_COLUMNS, sorted(rows, key=lambda x: x["site"]))
+        said = f"{host} uses {browser}" + (f" as {account}" if account else "")
+        return [path], f"{product} browser: {said}", {"site": host, "browser": browser, "account": account}
+    return r.write("browser", edit)
+
+
+def browser_clear(r: Repo, product: str, site: str = "") -> dict:
+    """Forget one site's browser, or (no site) the whole map."""
+    path, host = r.product(product) / BROWSERS, site_host(site) if site else ""
+
+    def edit():
+        rows = _read_tsv(path, BROWSER_COLUMNS)
+        kept = [x for x in rows if host and x["site"] != host]
+        if len(kept) == len(rows):
+            raise KitError(f"No browser is recorded for {host}" if host else "No browsers are recorded")
+        _write_tsv(path, BROWSER_COLUMNS, kept)
+        return [path], f"{product} browser: {'forgot ' + host if host else 'map cleared'}", \
+            {"cleared": host or "all", "left": len(kept)}
+    return r.write("browser", edit)
+
+
+def browser_line(rows: list[dict]) -> str:
+    """The map in one line for nh recall, at most BROWSERS_MAX characters; "" when empty."""
+    if not rows:
+        return ""
+    return _short("Browsers (use these; check the signed-in account before any write): " + "; ".join(
+        f"{x['site']}: {x['browser']}" + (f" as {x['account']}" if x["account"] else "") for x in rows), BROWSERS_MAX)
+
+
 # ---------------------------------------------------------------- recall (what a supervisor reads at start)
 
 RECALL_CAP = 4000  # characters: Claude cuts hook output over 10,000 to a short preview, and every turn re-reads it
@@ -1086,7 +1146,8 @@ def _recall_list(s: dict, r: Repo, product: str, fields: dict, owner: str, prs: 
                 f"{g['holder']} on {g['resource']} ({', '.join(g['items'])}; {g['state']})" for g in held)
             if held else "",
             "inbox": f"Inbox: {len(waiting)} message(s) to handle: nh inbox list {r.name} {product}" if waiting else "",
-            "orders": _read_orders(d / "orders.md")}
+            "orders": _read_orders(d / "orders.md"),
+            "browsers": browser_line(_read_tsv(d / BROWSERS, BROWSER_COLUMNS))}
 
 
 def _to_fix(s: dict, r: Repo, product: str) -> list[dict]:
@@ -1107,11 +1168,12 @@ ROLE = ("Your role: you are this list's supervisor. Builders do code changes; sm
 
 
 def _header(x: dict) -> list[str]:
-    """Who the list is for and the supervisor's role, under the list's heading: never cut by RECALL_CAP."""
+    """Who the list is for, the supervisor's role and the browser map (one line, BROWSERS_MAX at most), under the
+    list's heading: never cut by RECALL_CAP."""
     about = x.get("about") or ("not written yet. Write two or three plain lines with the owner (who the client is, "
                                f"what the work is for, its main goals): nh product set {x['repo']} {x['product']} "
                                "--about \"...\"")
-    return [f"About: {about}", ROLE]
+    return [f"About: {about}", ROLE] + ([x["browsers"]] if x.get("browsers") else [])
 
 
 def _importance(lists: list[dict]) -> list[int]:

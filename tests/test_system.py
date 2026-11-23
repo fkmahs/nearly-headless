@@ -55,7 +55,7 @@ class System(unittest.TestCase):
         self.assertEqual(stop({}), {"Required reply parts": False, "Support work recorded": True})
         self.assertEqual(stop({"reply": {"require": ["x"], "record": False}}),
                          {"Required reply parts": True, "Support work recorded": False})
-        self.assertEqual([h["checks"] for h in shown[:-1]], [[]] * 5)  # only the Stop hook carries the checks
+        self.assertEqual([h["checks"] for h in shown[:-1]], [[]] * 6)  # only the Stop hook carries the checks
         self.assertTrue(all(h["when"] and h["what"] for h in shown))  # each has its plain words
         # one hook taken out of Claude's settings shows as missing; a file that can't be read, as unknown
         written["Stop"] = []

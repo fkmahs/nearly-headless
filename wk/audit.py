@@ -3,20 +3,22 @@
 It reads this laptop's Claude Code chats (~/.claude/projects/<folder>/<session>.jsonl; agents' own files under
 <session>/subagents/ and sidechain lines are skipped) changed in the last N days, one line at a time, and counts per
 chat: turns, the chat's own tool calls per turn, agents, browser use, shell calls, compactions, merges and whether a
-fresh gate ran before each, push notifications, and keyword hits in the owner's messages. It writes measure.json and a
+fresh gate ran before each (an nh merge runs its own gate, so it counts as gated; a raw merge the merge guard refused
+never ran), push notifications, and keyword hits in the owner's messages. It writes measure.json and a
 short measure.md to a private folder beside the laptop's settings (audits/<date>/), never inside a repo. Only counts
 are kept: no message text, ever. Judging the chats is the skill's agents' job.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import statistics
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import core, reply
+from . import core, merge, reply
 from .core import KitError
 
 # what the owner's messages are counted for; one place to tune. Each message counts once per kind.
@@ -35,12 +37,26 @@ _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
-_STEP = re.compile(r"&&|\|\||[;|\n]|[\"']")  # one command line holds steps; each must start with the command to count
-_THEN = r"^\s*(?:if\s*\(\$\?\)\s*\{\s*)?"  # PowerShell's `; if ($?) { ... }` runs it too
+# one command line holds steps; each must start with the command to count. A group or subshell opens a step too:
+# ( { $( and PowerShell's if (...) { ... }.
+_STEP = re.compile(r"&&|\|\||\$\(|[;|\n(){}]|[\"']")
+# before the command: PowerShell's call operator &, NAME=1, and commands that run the next one (env, xargs, time...)
+_THEN = (r"^\s*&?\s*(?:(?:[A-Za-z_]\w*=\S*|env|xargs|time|command|builtin|exec|nohup|nice|sudo|doas|noglob|stdbuf"
+         r"|timeout)(?:\s+-[\w-]+(?:=\S*)?)*\s+)*")
 _FLAGS = r"(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*"  # a tool's own flags before its subcommand: gh -R acme/app pr ...
-_MERGE = re.compile(_THEN + r"(?:[^\s\"';&|]*[\\/])?gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
-_FRESH = re.compile(_THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)"
-                    + _FLAGS + r"\s+gate\s+fresh\b(.*)$", re.S)
+_GH = r"""(?:["'][^"']*[\\/]gh(?:\.exe)?["']|["']gh(?:\.exe)?["']|(?:[^\s"';&|]*[\\/])?gh(?:\.exe)?)"""
+_MERGE = re.compile(_THEN + _GH + _FLAGS + r"\s+pr\s+merge\b(.*)$", re.S)
+# a shell started with a command string: bash -c '...', pwsh -Command "...", powershell -EncodedCommand <base64>
+_SHELL_RUN = re.compile(_THEN + r"""["']?(?:[^\s"';&|]*[\\/])?(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd)(?:\.exe)?["']?"""
+                    r"(?=\s|$)(.*)$", re.I | re.S)
+_STRING = re.compile(r"(?:^|\s)(-(?:\w*c|command|encodedcommand|enc|ec|e)|/c)(?=\s)\s*(.*)$", re.I | re.S)
+_RAW = re.compile(r"(?<![\w-])gh(?:\.exe)?" + _FLAGS + r"\s+pr\s+merge\b", re.I)  # a string nh can't read into
+_NH = _THEN + r"&?\s*(?:" + reply._WK + r"|(?:py|python3?)(?:\.exe)?\s+(?:-\w+\s+)*-m\s+wk)" + _FLAGS
+_FRESH = re.compile(_NH + r"\s+gate\s+fresh\b(.*)$", re.S)
+_NH_MERGE = re.compile(_NH + r"\s+merge\b(.*)$", re.S)  # nh merge: the gate, CI and the merge in one step
+_DRY = re.compile(r"(?:^|\s)--dry-run\b")
+_GUARDED = merge.REFUSAL.split(" (")[0]  # the merge guard's refusal: that raw merge never ran
+_MERGED = re.compile(r"^ok\s+merge:", re.M)  # nh merge's line once it merged, even if a later step stops
 _PR = re.compile(r"--pr[ =]+#?(\d+)|/pull/(\d+)")
 _VALUE = re.compile(r"--?(?:match-head-commit|repo|R|subject|t|body|b|author-email|A)[ =]+\S+")
 _NUMBER = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)")
@@ -84,22 +100,54 @@ def _p90(values: list[int]) -> int:
     return ordered[max(0, -(-len(ordered) * 9 // 10) - 1)] if ordered else 0
 
 
-def steps(command: str) -> list[tuple[str, int | None]]:
-    """The command's merges and fresh gates, in order, as ("merge"|"gate", PR number or None): only steps that run
-    the command itself, never one inside a grep or an echo, nor a --help."""
+def steps(command: str, depth: int = 0) -> list[tuple[str, int | None]]:
+    """The command's merges and fresh gates, in order, as ("merge"|"gate"|"nh merge", PR number or None): only steps
+    that run the command itself, never one inside a grep or an echo, nor a --help or an nh merge --dry-run. A shell
+    started with a command string (bash -c, pwsh -Command or -EncodedCommand) is read into; one that can't be read
+    counts as a merge if gh pr merge appears in it."""
     found = []
     for step in _split(command):
+        if (shell := _SHELL_RUN.match(step)) and (inner := _inner(shell.group(1))) != "":
+            if inner is not None and depth < 3:
+                found += steps(inner, depth + 1)
+            elif _RAW.search(step):
+                found.append(("merge", None))
+            continue
         if reply._HELP.search(step):
             continue
         if m := _MERGE.match(step):
             found.append(("merge", _pr_of(m.group(1), merge=True)))
         elif m := _FRESH.match(step):
             found.append(("gate", _pr_of(m.group(1))))
+        elif (m := _NH_MERGE.match(step)) and not _DRY.search(m.group(1)):
+            found.append(("nh merge", _pr_of(m.group(1))))
     return found
 
 
+def _inner(args: str) -> str | None:
+    """The command string a shell was given ("" when it was given none; None when it can't be read)."""
+    m = _STRING.search(args)
+    if not m:
+        return ""
+    flag, rest = m.group(1).lower(), m.group(2).strip()
+    if flag in ("-ec", "-enc", "-encodedcommand") or (flag == "-e" and rest[:1] not in ("'", '"')):
+        try:
+            return base64.b64decode(rest.split()[0].strip("'\""), validate=True).decode("utf-16-le")
+        except (ValueError, IndexError, UnicodeDecodeError):
+            if flag != "-e":  # bash -e is not PowerShell's -EncodedCommand: its rest is read as it is
+                return None
+    return _quoted(rest)
+
+
+def _quoted(rest: str) -> str:
+    if rest[:1] in ("'", '"'):
+        end = rest.find(rest[0], 1)
+        return rest[1:end] if end > 0 else rest[1:]
+    return rest
+
+
 def _split(command: str) -> list[str]:
-    """The command's steps, split at ;, &&, ||, | and new lines outside quotes."""
+    """The command's steps, split outside quotes at ;, &&, ||, |, new lines and where a group opens or closes."""
     found, start, quote = [], 0, ""
     for m in _STEP.finditer(command):
         sep = m.group(0)
@@ -116,12 +164,15 @@ def _pr_of(args: str, merge: bool = False) -> int | None:
     return int(next(g for g in m.groups() if g)) if m else None
 
 
+def _text(b: dict) -> str:
+    content = b.get("content")
+    return content if isinstance(content, str) else " ".join(
+        str(c.get("text", "")) for c in content if isinstance(c, dict)) if isinstance(content, list) else ""
+
+
 def _passed(b: dict) -> bool:
     """A tool result that is no error: the command ran and nothing in it says it was refused."""
-    content = b.get("content")
-    text = content if isinstance(content, str) else " ".join(
-        str(c.get("text", "")) for c in content if isinstance(c, dict)) if isinstance(content, list) else ""
-    return not b.get("is_error") and not re.search(r'"ok":\s*false|^Exit code [1-9]|^nh: ', text, re.M)
+    return not b.get("is_error") and not re.search(r'"ok":\s*false|^Exit code [1-9]|^nh: ', _text(b), re.M)
 
 
 def chat(path: Path, since: datetime) -> dict | None:
@@ -136,7 +187,7 @@ def chat(path: Path, since: datetime) -> dict | None:
     gates: set = set()  # PRs with a passed fresh gate no merge has used yet
     ended, roled, inside, summaries = True, False, False, 0
 
-    def settle(found, was_inside, ok):
+    def settle(found, was_inside, ok, text=""):
         chained = False  # a gate earlier in the same command: a failed result may mean the merge never ran
         for kind, pr in found:
             if kind == "gate":
@@ -144,12 +195,14 @@ def chat(path: Path, since: datetime) -> dict | None:
                 if ok and pr is not None:
                     gates.add(pr)
                 continue
-            if chained and not ok:
+            if (chained and not ok) or (kind == "merge" and _GUARDED in text):
                 continue
+            if kind == "nh merge" and not (ok or _MERGED.search(text)):
+                continue  # it stopped before merging
             if was_inside:
                 row["merges"] += 1
                 row["merges_unknown"] += pr is None
-                row["merges_gated"] += pr in gates
+                row["merges_gated"] += kind == "nh merge" or pr in gates
             gates.discard(pr)  # a gate is used up by the merge it came before
     for d in _entries(path):
         if d.get("isSidechain"):
@@ -190,7 +243,7 @@ def chat(path: Path, since: datetime) -> dict | None:
             continue
         for b in blocks:
             if b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
-                settle(*pending.pop(b.get("tool_use_id")), _passed(b))
+                settle(*pending.pop(b.get("tool_use_id")), _passed(b), _text(b))
         if reply._ended(d):
             ended = True
             continue

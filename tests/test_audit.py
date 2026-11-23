@@ -127,6 +127,19 @@ class Measure(unittest.TestCase):
         r = self.measure()["rows"][0]
         self.assertEqual((r["merges"], r["merges_gated"], r["merges_unknown"]), (7, 2, 1))
 
+    def test_nh_merge_counts_as_a_gated_merge_and_a_raw_merge_the_guard_refused_is_not_counted(self):
+        from wk import merge
+        self.chat("s1", [owner("merge it", 6),
+                         *ran(5.9, "nh merge --pr 20 --sha abc1234 --dry-run", "a"),  # prints the steps only
+                         *ran(5.8, "nh merge --pr 20 --sha abc1234 --piece P1", "b", "ok    merge: ...\nDone."),
+                         *ran(5.7, "nh merge --pr 21 --sha abc1234", "c", "nh: STOP  gate: refused", error=True),
+                         *ran(5.6, "nh merge --pr 22 --sha abc1234", "d",  # merged, then a later step stopped
+                              "nh: ok    approve: ...\nok    merge: ...\nSTOP  teardown: dirty", error=True),
+                         *ran(5.5, "gh pr merge 23 --merge", "e", merge.REFUSAL, error=True)])
+        self.assertEqual(audit.steps("cd app && py -P -m wk merge --pr 9 --sha abc"), [("nh merge", 9)])
+        r = self.measure()["rows"][0]
+        self.assertEqual((r["merges"], r["merges_gated"], r["merges_unknown"]), (2, 2, 0))
+
     def test_merges_and_gates_inside_a_grep_an_echo_or_help_are_not_counted(self):
         self.chat("s1", [owner("look", 6),
                          *ran(5.9, 'grep -rn "gh pr merge 12" skills/ | head', "a"),

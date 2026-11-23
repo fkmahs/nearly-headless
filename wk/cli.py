@@ -70,6 +70,40 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--pr", type=int, required=True, help="the pull request number")
     s.add_argument("--wait", type=float, default=30.0, help="minutes to wait for CI (default 30)")
 
+    s = sub.add_parser("merge", help="Merge a PR the owner approved, in one step that stops at the first failure "
+                                     "(exit 1 = stopped)",
+                       description="From the PR's repo: post 'Approved by the owner: merge @ <sha>', run nh gate fresh "
+                                   "at that sha, require green CI, gh pr merge --merge --match-head-commit, check the "
+                                   "merge holds exactly the approved files, tear down (worktree, git branch -d after an "
+                                   "ancestor check, the remote branch) and, with --piece, set the piece to merged. "
+                                   "--release vX.Y.Z also checks the version file, tags the merge commit, pushes the "
+                                   "tag and runs the repo's release steps (settings: release = [\"update\", "
+                                   "\"command-center\"]; the kit's own repo gets both). It never deploys to production.")
+    s.add_argument("--pr", type=int, required=True, help="the pull request number")
+    s.add_argument("--sha", required=True, help="the commit the owner approved (7+ characters)")
+    s.add_argument("--piece", default="", help="the piece to set to merged (P3)")
+    s.add_argument("--list", dest="list_name", default="", help="the piece's list, when more than one has that id")
+    s.add_argument("--release", default="", help="the tag to release, e.g. v1.2.3 (repos that release by tag)")
+    s.add_argument("--dry-run", action="store_true", help="print the steps without doing any of them")
+
+    sub.add_parser("merge-guard", help="Refuses a raw gh pr merge in a supervisor chat (run by a Claude hook)",
+                   description="Claude Code runs it before each Bash or PowerShell call, passing the call as JSON on "
+                               "stdin. In a chat that loaded the supervisor skill, a command running gh pr merge is "
+                               "refused with a pointer to nh merge, unless the command itself carries NH_RAW_MERGE=1; "
+                               "both are logged to merge-guard.log beside the settings file. Everything else is let "
+                               "through. Always exits 0.")
+
+    s = sub.add_parser("browser", help="Which browser, signed in as which account, each site is used in (set, list, "
+                                       "clear)",
+                       description="Kept in the list's own files (.work/<product>/browsers.tsv); nh recall prints it "
+                                   "in one line. The account label is free text the owner chooses, e.g. a role.")
+    s.add_argument("action", choices=["set", "list", "clear"])
+    s.add_argument("repo")
+    s.add_argument("product")
+    s.add_argument("site", nargs="?", help="set, clear: the site's host, e.g. app.example.com (clear without it: all)")
+    s.add_argument("browser", nargs="?", help="set: the browser's display name, as the browser tools show it")
+    s.add_argument("--account", default="", help="set: the signed-in account's label, e.g. a role")
+
     s = sub.add_parser("product", help="Declare a product in a repo's .work/, with its invoice line and supervisor")
     s.add_argument("action", choices=["add", "set", "list"])
     s.add_argument("repo")
@@ -599,6 +633,44 @@ def _reply_check(args) -> int:
     return 0
 
 
+def _merge_guard(args) -> int:
+    """Run by a Claude Code PreToolUse hook, so it must never break a chat: any error lets the call through. Refusing
+    is a JSON "deny" decision on stdout; letting it through is printing nothing."""
+    try:
+        from . import merge, settings
+        hook = json.loads(sys.stdin.read() or "{}") if not sys.stdin.isatty() else {}
+        if not isinstance(hook, dict):
+            return 0
+        decision, command = merge.guard(hook)
+        if not decision:
+            return 0
+        try:
+            merge.guard_log(settings.path(args.settings).parent / "merge-guard.log",
+                            str(hook.get("session_id") or ""), decision, command)
+        except OSError:
+            pass  # a log that can't be written never changes what Claude does
+        if decision == "deny":
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                     "permissionDecisionReason": merge.REFUSAL}}))
+    except Exception:  # noqa: BLE001 - bad input, settings or transcript: let the call through
+        pass
+    return 0
+
+
+def _browser(args, s):
+    from . import work
+    r, p = work.Repo(s, args.repo), args.product
+    if args.action == "set":
+        if not (args.site and args.browser):
+            raise KitError("nh browser set <repo> <product> <site-host> \"<browser display name>\" [--account \"...\"]")
+        return work.browser_set(r, p, args.site, args.browser, args.account)
+    if args.action == "clear":
+        return work.browser_clear(r, p, args.site or "")
+    rows = work.browsers(r, p)
+    return rows, table([["SITE", "BROWSER", "ACCOUNT", "SET"]] + [
+        [x["site"], x["browser"], x["account"], x["set"]] for x in rows]) if rows else "No browsers recorded"
+
+
 def _privacy(args, cwd: Path) -> int:
     """Runs before the daily update, so a push is never held up by one."""
     from . import privacy, settings
@@ -657,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
         return _recall(args, cwd)
     if args.cmd == "reply-check":
         return _reply_check(args)
+    if args.cmd == "merge-guard":
+        return _merge_guard(args)
     if args.cmd == "version":
         print(__version__)
         return 0
@@ -733,6 +807,11 @@ def main(argv: list[str] | None = None) -> int:
             result = _check(args, s)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 3 if str(result.get("push", "")).startswith("push failed") else 0
+        if c == "merge":
+            from . import merge
+            print(merge.merge(cwd, s, args.pr, args.sha, args.piece, args.release, args.list_name, args.dry_run,
+                              where))
+            return 0
         if c == "refresh":
             result = turns.refresh(cwd, s, args.pr, args.wait)
             print(json.dumps(result, indent=2) if args.json else f"{result['sha']}\n{result['refreshed']}")
@@ -740,7 +819,7 @@ def main(argv: list[str] | None = None) -> int:
         result = (_turn(args, cwd, s) if c == "turn" else _gate(args, cwd, s) if c == "gate"
                   else _product(args, s) if c == "product" else _piece(args, s) if c == "piece"
                   else _question(args, s) if c == "question" else _order(args, s) if c == "order"
-                  else _channels(args, s) if c == "channels"
+                  else _channels(args, s) if c == "channels" else _browser(args, s) if c == "browser"
                   else _inbox(args, s) if c == "inbox" else _status(s) if c == "status" else _hours(args, s, cwd))
         if isinstance(result, tuple):  # (data, text): text unless --json
             data, text = result
