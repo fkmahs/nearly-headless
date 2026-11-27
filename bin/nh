@@ -19,4 +19,12 @@ PY=py
 for C in python3 python3.13 python3.12 python3.11; do
   if "$C" -c "import sys; sys.exit(sys.version_info < (3, 11))" >/dev/null 2>&1; then PY="$C"; break; fi
 done
-PYTHONPATH="$KIT${PYTHONPATH:+:$PYTHONPATH}" PYTHONIOENCODING=utf-8 exec "$PY" -P -m wk "$@"
+# The kit goes first on PYTHONPATH, joined the way Python on this platform splits it. Git Bash on Windows hands
+# Python a ":" list of /c/... paths converted, but leaves a mixed one alone, so a kit command started from inside
+# a running one (git running the push hook, nh calling nh) inherits C:\... paths: join those with ";" instead.
+SEP=:; P="$PYTHONPATH"
+if W="$(cd "$KIT" && pwd -W 2>/dev/null)" && [ -n "$W" ]; then
+  KIT="$W"; SEP=";"
+  case "$P" in /*) P="$(cygpath -w -p "$P" 2>/dev/null || printf %s "$P")" ;; esac
+fi
+PYTHONPATH="$KIT${P:+$SEP$P}" PYTHONIOENCODING=utf-8 exec "$PY" -P -m wk "$@"

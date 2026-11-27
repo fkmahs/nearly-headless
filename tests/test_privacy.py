@@ -236,6 +236,42 @@ class Forwarding(unittest.TestCase):
                                   env=env)
             self.assertEqual((done.returncode, done.stdout.strip()), (0, cli.__version__))
 
+    def test_bin_nh_starts_from_inside_a_running_kit_command(self):
+        """A kit command that runs git hands its PYTHONPATH (the kit, as this platform writes paths) to the hooks
+        git runs, and the push hook starts bin/nh again: that inner start must still load the kit."""
+        tmp = Path(tempfile.mkdtemp())
+        s = tmp / "s.toml"
+        s.write_text('owner = "x"\n', encoding="utf-8")
+        env = os.environ | {"NH_SETTINGS": str(s), "NH_AUTO_UPDATE": "0"}
+        env.pop("NH_FORWARDED", None)
+        for inherited in (str(KIT), os.pathsep.join([str(KIT), str(tmp)])):
+            done = subprocess.run(["sh", str(KIT / "bin" / "nh"), "version"], capture_output=True, text=True,
+                                  env=env | {"PYTHONPATH": inherited})
+            self.assertEqual((done.returncode, done.stdout.strip()), (0, cli.__version__), done.stderr)
+        remote, repo = tmp / "remote.git", tmp / "repo"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        sh(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+        sh(repo, "tag", "v0.0.1")
+        hook = repo / ".git" / "hooks" / "pre-push"
+        hook.write_text(f'#!/bin/sh\nexec sh "{core.posix(KIT / "bin" / "nh")}" version\n', encoding="utf-8")
+        hook.chmod(0o755)
+        pushed = sh(repo, "push", str(remote), "v0.0.1", env=env | {"PYTHONPATH": str(KIT)}, check=False)
+        self.assertEqual(pushed.returncode, 0, pushed.stderr)  # the hook loaded the kit, so the tag went out
+
+    @unittest.skipUnless(os.name == "nt", "bin/nh.cmd runs on Windows only")
+    def test_bin_nh_cmd_never_runs_code_from_the_current_folder(self):
+        here = Path(tempfile.mkdtemp())
+        (here / "sitecustomize.py").write_text('print("FROM THE CURRENT FOLDER")\n', encoding="utf-8")
+        env = os.environ | {"NH_FORWARDED": "1", "NH_AUTO_UPDATE": "0"}
+        for inherited in (None, str(here.parent)):
+            env.pop("PYTHONPATH", None)
+            if inherited:
+                env["PYTHONPATH"] = inherited
+            done = subprocess.run(["cmd", "/c", str(KIT / "bin" / "nh.cmd"), "version"], capture_output=True,
+                                  text=True, env=env, cwd=here)
+            self.assertEqual((done.returncode, done.stdout.strip()), (0, cli.__version__), done.stderr)
+
     def test_doctor_says_which_checkout_ran(self):
         line = upkeep.ran_from({}, {"NH_FORWARDED": "/somewhere/old"})
         self.assertIn(f"ran from {core.posix(upkeep.KIT)}", line)

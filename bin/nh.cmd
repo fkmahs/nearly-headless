@@ -15,6 +15,9 @@ if defined WK_GO if exist "%WK_S%" for /f "usebackq tokens=1,* delims==" %%a in 
 for %%k in ("%~dp0..") do set "WK_HERE=%%~fk"
 if defined WK_T for %%k in ("%WK_T%") do set "WK_T=%%~fk"
 if defined WK_T if exist "%WK_T%\bin\nh.cmd" if /i not "%WK_T%"=="%WK_HERE%" set "NH_FORWARDED=%WK_HERE%" & call "%WK_T%\bin\nh.cmd" %* & call exit /b %%ERRORLEVEL%%
-set "PYTHONPATH=%~dp0..;%PYTHONPATH%"
+rem The kit goes first; an empty PYTHONPATH adds no trailing ";", which Python would read as the current folder.
+set "WK_P=%~dp0.."
+if defined PYTHONPATH set "WK_P=%~dp0..;%PYTHONPATH%"
+set "PYTHONPATH=%WK_P%"
 set "PYTHONIOENCODING=utf-8"
 py -P -m wk %* & call exit /b %%ERRORLEVEL%%
