@@ -30,5 +30,5 @@ nearly-headless stays generic: no client names, tickets, billing figures or pers
 | `wk-test.Dockerfile`, `wk/images/` (the Linux images `nh test` runs in; a changed file builds a new one) | `python -m unittest tests.test_testmap tests.test_work` |
 | `tests/test_<name>.py` | `python -m unittest tests.test_<name>` |
 | `toolkits/<kit>/` | `python -m unittest discover -s toolkits/<kit>/tests` |
-| `wk/__init__.py` (version only), `skills/`, `docs/`, `*.md`, `templates/pull_request_template.md`, `LICENSE` | none: read the diff |
+| `wk/__init__.py` (version only), `skills/`, `docs/`, `apps/`, `*.md`, `templates/pull_request_template.md`, `LICENSE` | none: read the diff |
 | `.github/workflows/`, `tests/test_toolkits.py` (what CI runs to decide what it tests; `nh refresh` reads this row) | the full run: `python -m unittest discover -s tests` on that sha (the PR's own green CI doesn't count) |

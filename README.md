@@ -73,3 +73,11 @@ In `toolkits/`, for repos that need them; a repo uses one when its AGENTS.md say
 |---|---|
 | [invoicing](toolkits/invoicing/README.md) | bills a client by the hours its repos recorded; the client's billing record lives in its own repo's `billing/` |
 | [netsuite](toolkits/netsuite/README.md) | read-only SuiteQL over NetSuite's REST API, paged and written to CSV or JSON; credentials in each repo's `.env` |
+
+## Apps
+
+In `apps/`, small apps for the Claude desktop app, separate from `nh`. Each folder has a README for people and an INSTALL guide your AI agent follows to publish the app as your own private artifact; you click Install.
+
+| | |
+|---|---|
+| [answer-deck](apps/answer-deck/README.md) | your waiting Claude Code chats as a stack of cards, the one to answer first on top; Open chat opens it, and a replied card checks itself off |
