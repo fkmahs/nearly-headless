@@ -74,6 +74,10 @@ In `toolkits/`, for repos that need them; a repo uses one when its AGENTS.md say
 | [invoicing](toolkits/invoicing/README.md) | bills a client by the hours its repos recorded; the client's billing record lives in its own repo's `billing/` |
 | [netsuite](toolkits/netsuite/README.md) | read-only SuiteQL over NetSuite's REST API, paged and written to CSV or JSON; credentials in each repo's `.env` |
 
+## Designing pages
+
+When a builder makes a page (a form, table or review screen, a dashboard, a small app), it follows **[Design references](docs/design-references.md)**: the open design systems and standards to use, what was left out and why, and the house rules the kit's own pages already keep.
+
 ## Apps
 
 In `apps/`, small apps for the Claude desktop app, separate from `nh`. Each folder has a README for people and an INSTALL guide your AI agent follows to publish the app as your own private artifact; you click Install.
