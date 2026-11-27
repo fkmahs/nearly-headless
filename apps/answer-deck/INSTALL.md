@@ -73,7 +73,7 @@ The rest the person sees, so ask them what they see and compare:
 | The link, after the app is installed | "Answer Deck is installed" and the example deck (expected: their own chats show only in the app) |
 | The link in a web browser | the example deck and "Open this in the Claude desktop app" (expected: it installs only from the desktop app) |
 | The installed app, before access | "Let Answer Deck read your chats" with **Allow access** |
-| The installed app, after access | their own chats as cards; the header says something like "1 of 4 · 3 waiting · updated 5s ago", and the tag beside **Refresh** says "Ordered by Claude" (or "Ordered by rule" and why) |
+| The installed app, after access | their own chats as cards; the header says something like "1 of 4 · 3 waiting · updated 5s ago", and the tag beside **Refresh** says "Ordered by Claude" (or "Ordered by rule" and why; "Claude is ordering" for a moment while it works) |
 | **Open chat** on the front card | that chat opens in the Claude desktop app |
 
 If something differs:
