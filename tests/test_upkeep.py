@@ -989,15 +989,16 @@ class Upkeep(unittest.TestCase):
                 "Stop": [{"hooks": [{"type": "command", "command": command(upkeep.REPLY), "timeout": 30}]}],
                 "UserPromptSubmit": [{"hooks": [{"type": "command", "command": command(upkeep.REMIND),
                                                  "timeout": 30}]}],
-                "PreToolUse": [{"matcher": upkeep.MERGE_GUARD[1], "hooks": [{
-                    "type": "command", "command": command(upkeep.MERGE_GUARD), "timeout": 30}]}]}}),
+                "PreToolUse": [{"matcher": spec[1], "hooks": [{"type": "command", "command": command(spec),
+                                                               "timeout": 30}]}
+                               for spec in (upkeep.MERGE_GUARD, upkeep.BROWSER_GUARD)]}}),
                 encoding="utf-8")
         try:
             upkeep.KIT = self.tmp / "kit-builder"  # a builder's copy of wk, as its own command center runs it
             hooks_in(kit)
-            self.assertEqual([c["ok"] for c in upkeep.hook_check()], [True] * 7)
+            self.assertEqual([c["ok"] for c in upkeep.hook_check()], [True] * 8)
             hooks_in(other)  # hooks of another nearly-headless folder are still missing ones
-            self.assertEqual([c["ok"] for c in upkeep.hook_check()], [False] * 7)
+            self.assertEqual([c["ok"] for c in upkeep.hook_check()], [False] * 8)
         finally:
             upkeep.KIT = real
 

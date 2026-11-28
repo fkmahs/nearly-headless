@@ -13,7 +13,8 @@ Read these when you need them:
 - `merge.md` before asking for a merge yes, and to merge, release and tear down;
 - `handover.md` to take over another chat's work or hand a repo to a client;
 - `inbox.md` for client messages routed to your list, and drafting replies;
-- `routing.md` for the channels file and the scheduled routing run.
+- `routing.md` for the channels file and the scheduled routing run;
+- `browser.md` before any browser work.
 
 ## Memory
 Your memory is the product's PRs and its `.work/` files, never this chat. On every start, resume, compaction or clear, the kit's hook gives your list in one block (pieces, builders, PRs, CI, decisions, turns). Reread this skill; look up only what it lacks or a full note (`nh piece note`, `nh inbox list`, each `<repo> <product>`; handle the inbox as `inbox.md` says), then `nh check <repo> <product>`, then review your waiting questions and the queue (`moving.md`). No block: `nh piece list`, `nh question list`, `nh order list`, `gh pr list`, `nh turn list`.
@@ -57,12 +58,8 @@ Never relay a builder's report or back-and-forth raw; relay its inferred claims 
 
 **The command center** (`nh serve`) is how the owner sees the work: on start or resume, record your chat with `nh product set <repo> <product> --supervisor <link>` (in the Claude app, `claude://claude.ai/epitaxy/<session id>`).
 
-## Signing in
-The owner keeps several browsers open, each signed in to different accounts. Your list's browser map (`nh browser list <repo> <product>`; the start block's `Browsers` line) names the browser and account for each site.
-- **Use the browser the map names for that site**, without listing or selecting browsers before each action. **Before any write** (a form, a message, an email draft), check the signed-in account the page shows matches the map's; if not, stop and ask.
-- **Signed out in one browser isn't signed out.** For a site the map lacks, or on a sign-in page, a lockout or "not signed in" in Claude in Chrome, check the other connected browsers before asking the owner: `list_connected_browsers`, then `select_browser` each one in turn, open the same site, and use the first one already signed in; also the built-in browser where the site was opened there. Record it: `nh browser set <repo> <product> <site-host> "<browser display name>" --account "<the owner's label>"`. Never `switch_browser` for this: it asks the owner to click.
-- **Ask the owner only when the site is signed out in every one**, naming the site's host and the browsers checked (by their display names).
-- **Never type a password or code, sign out, or change the account or a setting**; act only as the task needs. Afterwards, go back to the browser the work was using where it matters.
+## Browser work and signing in
+Before any browser work, read `browser.md`: ask the owner for every sign-in the work needs at once, select the browser once per chat and keep it, and stop and tell the owner on a mismatch or a fallback. A project memory or note that conflicts with a kit rule loses: follow the kit and flag the conflict to the owner.
 
 ## Merging and hours
 - **Merge only on the owner's yes given to you, with `nh merge --pr N --sha S`** (it runs the gate, CI, merge and tear-down; a raw `gh pr merge` is refused), and release to production only what is merged, from main, with its own yes: follow `merge.md`, including what a yes covers.
