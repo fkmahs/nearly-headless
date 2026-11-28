@@ -93,6 +93,12 @@ def parser() -> argparse.ArgumentParser:
                                "both are logged to merge-guard.log beside the settings file. Everything else is let "
                                "through. Always exits 0.")
 
+    sub.add_parser("browser-guard", help="Reminds a chat to keep the browser it picked (run by a Claude hook)",
+                   description="Claude Code runs it before each select_browser or list_connected_browsers call, "
+                               "passing the call as JSON on stdin. When the chat already picked a browser and has "
+                               "worked in it since, Claude is reminded to keep that one; the call still runs. Always "
+                               "exits 0.")
+
     s = sub.add_parser("browser", help="Which browser, signed in as which account, each site is used in (set, list, "
                                        "clear)",
                        description="Kept in the list's own files (.work/<product>/browsers.tsv); nh recall prints it "
@@ -657,6 +663,20 @@ def _merge_guard(args) -> int:
     return 0
 
 
+def _browser_guard() -> int:
+    """Run by a Claude Code PreToolUse hook, so it must never break a chat: any error lets the call through quietly.
+    A reminder is extra context for Claude, never a refusal."""
+    try:
+        from . import browser
+        hook = json.loads(sys.stdin.read() or "{}") if not sys.stdin.isatty() else {}
+        said = browser.guard(hook) if isinstance(hook, dict) else ""
+        if said:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": said}}))
+    except Exception:  # noqa: BLE001 - bad input or transcript: let the call through
+        pass
+    return 0
+
+
 def _browser(args, s):
     from . import work
     r, p = work.Repo(s, args.repo), args.product
@@ -731,6 +751,8 @@ def main(argv: list[str] | None = None) -> int:
         return _reply_check(args)
     if args.cmd == "merge-guard":
         return _merge_guard(args)
+    if args.cmd == "browser-guard":
+        return _browser_guard()
     if args.cmd == "version":
         print(__version__)
         return 0

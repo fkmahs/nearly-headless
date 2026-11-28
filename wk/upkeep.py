@@ -8,7 +8,8 @@ setup   writes this laptop's settings file (if it has none; else adds any --repo
         (`nh recall`), the hook
         that holds a supervisor's reply to the format (`nh reply-check`, off until the settings file lists the parts)
         and the one that names those parts before each turn (`nh reply-check --remind`), the one that refuses a raw
-        gh pr merge in a supervisor chat (`nh merge-guard`),
+        gh pr merge in a supervisor chat (`nh merge-guard`), the one that reminds a chat to keep the browser it
+        picked (`nh browser-guard`),
         and an earlier auto-compact window, so long chats re-read less each turn; and, in every repo it lists, git's
         local exclude list of files that never go to GitHub (keepout.py), and its separate list checkout's
 update  moves this nearly-headless checkout to the newest release on GitHub, then lets that release install itself
@@ -176,7 +177,8 @@ RECALL_RESUME = ("SessionStart", "resume", "recall")  # and when the owner resum
 REPLY = ("Stop", None, "reply-check")           # holds a supervisor's reply to the format; off until configured
 REMIND = ("UserPromptSubmit", None, "reply-check --remind")  # names those parts before each turn; off the same way
 MERGE_GUARD = ("PreToolUse", "Bash|PowerShell", "merge-guard")  # refuses a raw gh pr merge in a supervisor chat
-HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, MERGE_GUARD, REPLY)  # every hook setup installs, in a chat's order
+BROWSER_GUARD = ("PreToolUse", r"mcp__.*__(select_browser|list_connected_browsers)", "browser-guard")  # keep one browser
+HOOKS = (RECALL_START, RECALL_RESUME, RECALL, RECALL_CLEAR, REMIND, MERGE_GUARD, BROWSER_GUARD, REPLY)  # every hook setup installs, in a chat's order
 
 
 def hook_command(spec: tuple = RECALL) -> str:
@@ -549,7 +551,8 @@ def setup(where: Path, owner: str = "", repos: list[str] = (), skills: Path | No
             "skills": install_skills(skills),
             "expectations": install_expectations(settings.load(where)), "hook": install_hook(), "clear_hook": install_hook(RECALL_CLEAR),
             "start_hook": install_hook(RECALL_START), "resume_hook": install_hook(RECALL_RESUME), "reply_hook": install_hook(REPLY),
-            "remind_hook": install_hook(REMIND), "merge_guard_hook": install_hook(MERGE_GUARD), "push": install_push(), "compact_window": install_window(),
+            "remind_hook": install_hook(REMIND), "merge_guard_hook": install_hook(MERGE_GUARD),
+            "browser_guard_hook": install_hook(BROWSER_GUARD), "push": install_push(), "compact_window": install_window(),
             "keep_out": install_keepout(settings.load(where)), "privacy_guard": install_guard(settings.load(where)),
             "agents": [a["agent"] for a in agents()],
             "version": __version__, "launcher": core.posix(KIT / "bin"),
@@ -702,7 +705,9 @@ def hook_check() -> list[dict]:
                        (REMIND, "Claude: supervisors are reminded of the parts in [reply] require before each turn, "
                                 "when set (nh reply-check --remind hook)"),
                        (MERGE_GUARD, "Claude: a raw gh pr merge in a supervisor chat is refused, pointing to nh merge "
-                                     "(nh merge-guard hook)")):
+                                     "(nh merge-guard hook)"),
+                       (BROWSER_GUARD, "Claude: a chat that picks its browser again mid-work is reminded to keep the "
+                                       "one it picked (nh browser-guard hook)")):
         found.append({"ok": bool(hook_installed(spec)), "check": what})
     return found
 

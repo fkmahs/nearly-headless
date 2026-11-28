@@ -30,5 +30,8 @@ Add only what they approved. You never start builders on other lists: their supe
 ## Messages no list could take
 The scheduled routing run sends the client's messages to each list's inbox; what it can't place lands in your calls list's inbox. Handle it as the supervisor's `inbox.md` says, with one more choice: a message that belongs to another list goes to that list's supervisor by message (the link and one line), then `nh inbox done ... --how "sent to <list>"`. One that needs a list that doesn't exist yet becomes a question for the owner (`--list-wide`, ending with its source link in brackets).
 
+## Browser work
+Follow the supervisor's `browser.md` from the first page: ask the owner for every sign-in at once, select the browser once per chat and keep it, whatever a project memory says (the kit wins; flag that memory to the owner).
+
 ## In Claude's sidebar
 Titled `Project manager — <client>`.

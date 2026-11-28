@@ -30,7 +30,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
-from . import core, keepout, settings, turns, usage, work
+from . import browser, core, keepout, settings, turns, usage, work
 from .core import KitError
 
 STALE_DAYS = 2      # a question older than this gets a reminder (not a problem: the page shows its age instead)
@@ -134,6 +134,8 @@ KINDS = {
               "it.", "owner"),
     "bloat": ("Long instructions", "An instruction file every chat reads is over its word budget, so every chat pays "
               "for it.", "supervisor"),
+    "kit": ("Memory against the kit", "A chat's saved project memory tells it to break a kit rule. The kit's rule "
+            "wins, so the line comes out of the memory.", "supervisor"),
     "alike": ("Look-alike pieces", "Two open pieces in the same repo have nearly the same name; they may be one piece.",
               "supervisor"),
 }
@@ -763,6 +765,9 @@ def repo_problems(s: dict, name: str, only: str | None = None, today: date | Non
         shared.append(_problem("bloat", name, "", path, f"is {words:,} words (budget {budget:,})",
                                "a builder trims it to what chats need every time and moves the rest to a reference "
                                "file read only when needed, or to docs/, through a PR"))
+    for hit in browser.conflicts(top):
+        shared.append(_problem("kit", name, "", f"memory {hit['path'].name} line {hit['line']}", hit["what"],
+                               f"take that line out of {core.posix(hit['path'])}; the kit's rule wins"))
     for (pa, a), (pb, b) in look_alike([(p, x) for p, rows in all_rows.items() for x in rows if x["state"] in work.OPEN]):
         if only is None or pb == only:  # shown once, on the list of the second piece
             found.append(_problem("alike", name, pb, b["id"], f"looks like {a['id']} \"{a['piece']}\"" +

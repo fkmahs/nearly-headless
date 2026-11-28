@@ -632,6 +632,18 @@ class Check(unittest.TestCase):
             ("skills/deploy/steps.md", "is 1,010 words (budget 1,000)"),
             (".claude/skills/close/SKILL.md", "is 2,000 words (budget 1,500)")])
 
+    def test_a_saved_memory_against_a_kit_rule_is_a_finding(self):
+        from unittest import mock
+        from wk import browser, usage
+        memory = self.tmp / "projects" / browser.slug(self.app) / "memory"
+        memory.mkdir(parents=True)
+        (memory / "browser.md").write_text("Re-select the browser every turn.\n", encoding="utf-8")
+        with mock.patch.object(usage, "projects", return_value=self.tmp / "projects"):
+            found = [p for p in self.found() if p["kind"] == "kit"]
+        self.assertEqual([(p["item"], p["what"][:40]) for p in found],
+                         [("memory browser.md line 1", "tells chats to pick the browser again ev")])
+        self.assertIn("the kit's rule wins", found[0]["fix"])
+
     def test_look_alike_pieces_in_the_same_repo(self):
         self.wk("product", "add", "acme", "billing", "--line", "Invoices")
         for product, name in (("reports", "Faster month-end exports"), ("reports", "Monthly invoice email"),
