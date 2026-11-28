@@ -22,6 +22,14 @@ PIECE_STATES = ["todo", "building", "ready", "merged", "done", "dropped"]  # wor
 BILL_CHOICES = ["yes", "later", "no"]  # work.BILL
 
 
+def audit_date(text: str) -> datetime:
+    """A date or date and time for nh audit measure; without a time zone it is this laptop's local time."""
+    try:
+        return datetime.fromisoformat(text).astimezone()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a date: {text!r} (use 2026-11-20 or 2026-11-20T09:00)") from None
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="nh", description=__doc__)
     p.add_argument("--settings", type=Path,
@@ -281,15 +289,20 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("audit", help="The weekly audit's counts over this laptop's chats (read-only; counts only, "
                                      "never message text)",
-                       description="measure: reads every Claude Code chat changed in the last N days (agents' own "
-                                   "files skipped) and counts per chat its turns, own tool calls per turn, agents, "
+                       description="measure: reads every Claude Code chat changed in the last N days, or between "
+                                   "--since and --until (agents' own files skipped) and counts per chat, from entries "
+                                   "inside that window only, its role (the first kit skill it loads), turns, own tool calls per turn, agents, "
                                    "browser use, shell calls, compactions, merges and whether a fresh gate ran before "
                                    "each, push notifications and keyword hits in the owner's messages. Writes "
                                    "measure.json and measure.md to audits/<date>/ beside the settings file (never "
                                    "inside a repo) and prints that folder. The weekly-audit skill reads them.")
     s.add_argument("what", choices=["measure"])
     s.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
-    s.add_argument("--out", type=Path, help="the folder to write to (default audits/<date>/ beside the settings)")
+    s.add_argument("--since", type=audit_date, help="start of the window instead, e.g. 2026-11-20 (local time); to "
+                                                     "compare before and after a release")
+    s.add_argument("--until", type=audit_date, help="end of the window with --since (default now)")
+    s.add_argument("--out", type=Path, help="the folder to write to (default audits/<date>/ beside the settings, "
+                                            "audits/<date>/<since>_to_<until>/ with --since)")
 
     s = sub.add_parser("serve", help="Open the command center: a local page showing every repo in the settings")
     s.add_argument("--port", type=int, default=8765)
@@ -768,8 +781,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if c == "audit":
             from . import audit
-            m = audit.measure(args.days)
-            out = audit.write(m, args.out or audit.folder(where, datetime.now()))
+            if args.until and not args.since:
+                raise KitError("--until needs --since")
+            m = audit.measure(args.days, since=args.since, until=args.until)
+            out = audit.folder(where, datetime.now())
+            if args.since:  # a chosen period never overwrites the weekly run's files
+                out /= f"{m['since'][:10]}_to_{m['until'][:10]}"
+            out = audit.write(m, args.out or out)
             t = m["totals"]
             print(core.posix(out))
             print(f"{m['chats']} chats, {t['turns']} turns, {t['own_calls']} own tool calls, {t['agents']} agents, "

@@ -1,12 +1,13 @@
 """`nh audit measure`: the counting half of the weekly audit (skills/weekly-audit), read-only.
 
 It reads this laptop's Claude Code chats (~/.claude/projects/<folder>/<session>.jsonl; agents' own files under
-<session>/subagents/ and sidechain lines are skipped) changed in the last N days, one line at a time, and counts per
-chat: turns, the chat's own tool calls per turn, agents, browser use, shell calls, compactions, merges and whether a
+<session>/subagents/ and sidechain lines are skipped) changed in the window (the last N days, or --since/--until), one
+line at a time, and counts per chat, only from entries timestamped inside the window: turns, the chat's own tool calls per turn, agents, browser use, shell calls, compactions, merges and whether a
 fresh gate ran before each (an nh merge runs its own gate, so it counts as gated; a raw merge the merge guard refused
 never ran), push notifications, and keyword hits in the owner's messages. It writes measure.json and a
 short measure.md to a private folder beside the laptop's settings (audits/<date>/), never inside a repo. Only counts
-are kept: no message text, ever. Judging the chats is the skill's agents' job.
+are kept: no message text, ever. A chat's role is the first kit skill it loads; its first message only when it
+loaded none. Judging the chats is the skill's agents' job.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ _KEYS = {k: re.compile("|".join(r"(?<!\w)" + re.escape(w) + (r"(?!\w)" if w[-1].
 _AGENT = ("Agent", "Task")
 _SHELL = ("Bash", "PowerShell")
 _PICK = re.compile(r"__(?:list|select|switch)_\w*browsers?$", re.I)  # choosing which browser, not using it
+_TYPED = re.compile(r"<command-name>/?([\w:-]+)</command-name>")  # a slash command the owner typed
 _ROLES = (("project manager", re.compile(r"project[- ]manager", re.I)), ("builder", re.compile(r"\bbuilder\b", re.I)),
           ("supervisor", re.compile(r"\bsupervisor\b", re.I)))
 # one command line holds steps; each must start with the command to count. A group or subshell opens a step too:
@@ -60,6 +62,21 @@ _MERGED = re.compile(r"^ok\s+merge:", re.M)  # nh merge's line once it merged, e
 _PR = re.compile(r"--pr[ =]+#?(\d+)|/pull/(\d+)")
 _VALUE = re.compile(r"--?(?:match-head-commit|repo|R|subject|t|body|b|author-email|A)[ =]+\S+")
 _NUMBER = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)")
+_HELPERS = {"catch-up", "wwid"}  # kit skills a role loads along the way: they say nothing about what the chat is
+
+
+def _kit_skills() -> frozenset:
+    """The kit's skills that name a role: every skill in its skills/ folder but the helpers."""
+    found = Path(__file__).resolve().parents[1] / "skills"
+    return frozenset(p.name for p in found.iterdir() if (p / "SKILL.md").is_file() and p.name not in _HELPERS) \
+        if found.is_dir() else frozenset()
+
+
+def _role(skill: str, kit: frozenset) -> str | None:
+    """The role a loaded skill names, when it is one of the kit's (plugin:name and dir:name forms too)."""
+    name = skill.strip().lstrip("/").rsplit(":", 1)[-1]
+    return name.replace("-", " ") if name in kit else None
+
 
 def root() -> Path:
     from . import usage
@@ -175,9 +192,9 @@ def _passed(b: dict) -> bool:
     return not b.get("is_error") and not re.search(r'"ok":\s*false|^Exit code [1-9]|^nh: ', _text(b), re.M)
 
 
-def chat(path: Path, since: datetime) -> dict | None:
-    """One chat's counts from since on; None when nothing in it is that recent. A turn already running when the
-    window opens counts once, whole."""
+def chat(path: Path, since: datetime, until: datetime | None = None) -> dict | None:
+    """One chat's counts from entries timestamped in [since, until); None when it has none. An entry with no
+    timestamp takes the one before it. A turn counts when it starts in the window, with its calls in the window."""
     row = {"session": path.stem, "project": path.parent.name, "first": "", "last": "", "role": "other",
            "owner_messages": 0, "turns": 0, "own_calls": {"total": 0, "median": 0, "p90": 0, "max": 0}, "agents": 0,
            "browser": 0, "browser_picking": 0, "shell": 0, "compactions": 0, "merges": 0, "merges_gated": 0,
@@ -185,7 +202,7 @@ def chat(path: Path, since: datetime) -> dict | None:
     turns: list[list] = []  # [own calls, touched the window]
     pending: dict = {}  # a shell call's id -> (its merges and gates, inside the window), until its result comes
     gates: set = set()  # PRs with a passed fresh gate no merge has used yet
-    ended, roled, inside, summaries = True, False, False, 0
+    ended, first_role, skill_role, inside, summaries, kit = True, None, None, False, 0, _kit_skills()
 
     def settle(found, was_inside, ok, text=""):
         chained = False  # a gate earlier in the same command: a failed result may mean the merge never ran
@@ -209,31 +226,33 @@ def chat(path: Path, since: datetime) -> dict | None:
             continue
         t = _when(d)
         if t is not None:
-            inside = t >= since
+            inside = t >= since and (until is None or t < until)
         blocks = reply._blocks(d)
         if inside and t is not None:
             row["first"] = row["first"] or d["timestamp"]
             row["last"] = d["timestamp"]
         starts = reply._owner_said(d, blocks) is not None or (reply._other(d, blocks) and ended)
-        if turns and inside and not starts:
-            turns[-1][1] = True
         said = reply._owner_said(d, blocks)
-        if said is not None and not roled:  # the chat's first message says what it is, even before the window
-            roled, row["role"] = True, next((r for r, p in _ROLES if p.search(said)), "other")
+        if said is not None and first_role is None:  # the fallback: the chat's first message, even before the window
+            first_role = next((r for r, p in _ROLES if p.search(said)), "other")
+        if said is not None and skill_role is None and (typed := _TYPED.search(said)):
+            skill_role = _role(typed.group(1), kit)
         if d.get("type") == "assistant":
             for b in blocks:
                 if b.get("type") != "tool_use":
                     continue
                 name = str(b.get("name", ""))
                 given = b.get("input") if isinstance(b.get("input"), dict) else {}
+                if name == "Skill" and skill_role is None:  # the first kit skill it loads says what it is
+                    skill_role = _role(str(given.get("skill", "")), kit)
                 if name in _SHELL and (found := steps(str(given.get("command", "")))):
                     pending[b.get("id")] = (found, inside)
                 if not turns:  # the chat's first turn began before anything it wrote
                     turns.append([0, inside])
-                if name not in reply._NOT_OWN and not reply._APP.search(name):  # as nh reply-check counts
-                    turns[-1][0] += 1
                 if not inside:
                     continue
+                if name not in reply._NOT_OWN and not reply._APP.search(name):  # as nh reply-check counts
+                    turns[-1][0] += 1
                 row["agents"] += name in _AGENT
                 row["shell"] += name in _SHELL
                 row["push_notifications"] += name.endswith("PushNotification")
@@ -261,8 +280,9 @@ def chat(path: Path, since: datetime) -> dict | None:
     for found, was_inside in pending.values():  # no result written: the gate's outcome is unknown
         settle(found, was_inside, False)
     row["compactions"] = max(row["compactions"], summaries)  # older chats leave only the summary
-    kept = [n for n, touched in turns if touched]
-    if not (row["first"] or kept):
+    row["role"] = skill_role or first_role or "other"
+    kept = [n for n, started_inside in turns if started_inside]
+    if not row["first"]:
         return None
     row["turns"] = len(kept)
     if kept:
@@ -275,18 +295,24 @@ TOTALS = ("owner_messages", "turns", "agents", "browser", "browser_picking", "sh
           "merges_gated", "merges_unknown", "push_notifications")
 
 
-def measure(days: int = 7, where: Path | None = None, now: datetime | None = None) -> dict:
-    """Every chat changed in the last `days` days, counted; with the totals across them."""
+def measure(days: int = 7, where: Path | None = None, now: datetime | None = None, since: datetime | None = None,
+            until: datetime | None = None) -> dict:
+    """Every chat changed in the window, counted; with the totals across them. The window is the last `days` days,
+    or since..until (until defaults to now) to compare one period with another, such as before and after a release."""
     if days < 1:
         raise KitError("--days must be 1 or more")
-    now = now or datetime.now(timezone.utc)
-    since, where = now - timedelta(days=days), where or root()
+    now = until or now or datetime.now(timezone.utc)
+    since, where = since or now - timedelta(days=days), where or root()
+    if since >= now:
+        raise KitError("--since must be before --until")
+    days = round((now - since) / timedelta(days=1), 1)
+    days = int(days) if days == int(days) else days
     rows = []
     for path in sorted(where.glob("*/*.jsonl")) if where.is_dir() else []:  # agents' files sit deeper: skipped
         try:
             if datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) < since:
                 continue
-            row = chat(path, since)
+            row = chat(path, since, now)
         except OSError:
             continue
         if row:
@@ -305,7 +331,7 @@ def table(m: dict) -> str:
     head = ["project", "session", "role", "owner msgs", "turns", "calls", "median", "p90", "max", "agents", "browser",
             "picking", "shell", "compactions", "merges", "gated", "unknown", "pushes", "corrections", "status asks",
             "sign-in"]
-    lines = [f"# Chats measured: {m['chats']} (last {m['days']} days, since {m['since']})", "",
+    lines = [f"# Chats measured: {m['chats']} ({m['days']} days, {m['since']} to {m['until']})", "",
              "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in m["rows"]:
         c, k = r["own_calls"], r["keywords"]

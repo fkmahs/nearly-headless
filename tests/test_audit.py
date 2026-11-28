@@ -175,12 +175,60 @@ class Measure(unittest.TestCase):
         self.assertEqual(r["first"], at(2))
         self.assertEqual(self.measure(days=10)["rows"][0]["turns"], 2)
 
-    def test_a_turn_running_when_the_window_opens_counts_once_whole(self):
+    def test_a_turn_running_when_the_window_opens_is_left_out(self):
         self.chat("s1", [owner("go", 24 * 7 + 1), calls(24 * 7 + 0.5, "Read", "Read"), calls(24 * 7 - 1, "Edit"),
                          ended(24 * 7 - 1.1), owner("next", 2), calls(1.9, "Read"), ended(1.8)])
         r = self.measure()["rows"][0]
-        self.assertEqual((r["turns"], r["owner_messages"]), (2, 1))
-        self.assertEqual(r["own_calls"], {"total": 4, "median": 2.0, "p90": 3, "max": 3})
+        self.assertEqual((r["turns"], r["owner_messages"]), (1, 1))
+        self.assertEqual(r["own_calls"], {"total": 1, "median": 1, "p90": 1, "max": 1})
+
+    def test_a_long_chat_with_one_turn_in_the_window_counts_only_that_turn(self):
+        old = []
+        for i in range(40):  # two busy weeks before the window: every kind of count
+            h = 24 * 20 - i * 6
+            old += [owner(f"No, wrong. Status? Sign in {i}", h),
+                    calls(h - 0.1, "Read", "Agent", "mcp__Claude_Browser__navigate", "PushNotification"),
+                    *ran(h - 0.2, f"nh gate fresh --pr {i} && gh pr merge {i}", f"m{i}"),
+                    {"type": "system", "subtype": "compact_boundary", "timestamp": at(h - 0.3)}, ended(h - 0.4)]
+        self.chat("long", old + [owner("one more", 2), calls(1.9, "Read"), ended(1.8)])
+        r = self.measure()["rows"][0]
+        self.assertEqual((r["turns"], r["owner_messages"], r["own_calls"]["total"]), (1, 1, 1))
+        self.assertEqual((r["agents"], r["browser"], r["shell"], r["push_notifications"], r["compactions"],
+                          r["merges"]), (0, 0, 0, 0, 0, 0))
+        self.assertEqual(r["keywords"], {"corrections": 0, "status_asks": 0, "sign_in_or_click": 0})
+        self.assertEqual(self.measure(days=30)["rows"][0]["merges"], 40)
+
+    def test_since_and_until_measure_a_chosen_period(self):
+        self.chat("s1", [owner("before", 24 * 5), calls(24 * 5 - 0.1, "Read"), ended(24 * 5 - 0.2),
+                         owner("during", 24 * 3), calls(24 * 3 - 0.1, "Read", "Agent"), ended(24 * 3 - 0.2),
+                         owner("after", 2), calls(1.9, "Read"), ended(1.8)])
+        m = audit.measure(where=self.root, now=NOW, since=NOW - timedelta(days=4), until=NOW - timedelta(days=1))
+        r = m["rows"][0]
+        self.assertEqual((m["days"], r["turns"], r["owner_messages"], r["agents"]), (3, 1, 1, 1))
+        self.assertEqual(r["first"], at(24 * 3))
+        with self.assertRaises(KitError):
+            audit.measure(where=self.root, now=NOW, since=NOW, until=NOW - timedelta(days=1))
+
+    def test_the_role_is_the_first_kit_skill_the_chat_loads(self):
+        brief = "You are the supervisor. Start a builder for each piece; the project manager sends notes."
+        self.chat("sup", [owner(brief, 3), calls(2.9, "Skill", Skill={"skill": "supervisor"}),
+                          calls(2.8, "Skill", ids=["t9"], Skill={"skill": "builder"}), ended(2.7)])
+        self.chat("typed", [owner("<command-name>/weekly-audit</command-name>", 3), calls(2.9, "Read")])
+        self.chat("plugin", [owner("Run as a builder", 3), calls(2.9, "Skill", Skill={"skill": "kit:project-manager"})])
+        self.chat("other", [owner("You are the builder", 3), calls(2.9, "Skill", Skill={"skill": "pdf"}),
+                            calls(2.8, "Skill", ids=["t9"], Skill={"skill": "catch-up"})])  # a helper, not a role
+        self.chat("none", [owner("Act as supervisor; brief each builder", 3), calls(2.9, "Read")])
+        roles = {r["session"]: r["role"] for r in self.measure()["rows"]}
+        self.assertEqual(roles, {"sup": "supervisor", "typed": "weekly audit", "plugin": "project manager",
+                                 "other": "builder", "none": "builder"})  # no kit skill: the first message, as before
+
+    def test_the_skill_has_judges_return_findings_and_the_supervisor_write_them(self):
+        folder = Path(audit.__file__).resolve().parents[1] / "skills" / "weekly-audit"
+        skill, rubric = ((folder / f).read_text(encoding="utf-8") for f in ("SKILL.md", "rubric.md"))
+        self.assertIn("You write each agent's findings to `findings-<n>.md`", skill)
+        self.assertIn("Return your findings as text", rubric)
+        self.assertNotIn("Write your findings", rubric)
+        self.assertNotIn("the file to write its findings to", skill)
 
     def test_it_writes_json_and_a_table_outside_any_repo_and_refuses_inside_one(self):
         self.chat("s1", [owner("hi", 1)])
@@ -198,12 +246,20 @@ class Measure(unittest.TestCase):
         from unittest import mock
         self.chat("s1", [owner("hi", 1), calls(0.9, "Read")])
         real, buf = audit.measure, io.StringIO()
-        with mock.patch.object(audit, "measure", lambda days: real(days, self.root, now=NOW)), redirect_stdout(buf):
+        fake = mock.patch.object(audit, "measure", lambda days, **kw: real(days, self.root, now=NOW, **kw))
+        with fake, redirect_stdout(buf):
             code = cli.main(["--settings", str(self.tmp / "settings.toml"), "audit", "measure", "--out",
                              str(self.tmp / "out")])
         self.assertEqual(code, 0)
         self.assertIn("1 chats, 1 turns, 1 own tool calls", buf.getvalue())
         self.assertTrue((self.tmp / "out" / "measure.md").is_file())
+        with fake, redirect_stdout(io.StringIO()):  # a chosen period gets its own folder beside the weekly run's
+            self.assertEqual(cli.main(["--settings", str(self.tmp / "settings.toml"), "audit", "measure", "--since",
+                                       "2026-03-09", "--until", "2026-03-11"]), 0)
+            self.assertNotEqual(cli.main(["--settings", str(self.tmp / "settings.toml"), "audit", "measure",
+                                          "--until", "2026-03-11"]), 0)
+        period = audit.folder(self.tmp / "settings.toml", datetime.now()) / "2026-03-09_to_2026-03-11"
+        self.assertEqual(json.loads((period / "measure.json").read_text(encoding="utf-8"))["days"], 2)
 
 
 if __name__ == "__main__":
