@@ -471,8 +471,10 @@ class Install(unittest.TestCase):
         upkeep.install_hook(upkeep.REPLY)
         upkeep.install_hook(upkeep.REMIND)
         upkeep.install_hook(upkeep.MERGE_GUARD)
+        upkeep.install_hook(upkeep.BROWSER_GUARD)
         after = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual([g["matcher"] for g in after["hooks"]["PreToolUse"]], ["Bash|PowerShell"])
+        self.assertEqual([g["matcher"] for g in after["hooks"]["PreToolUse"]],
+                         ["Bash|PowerShell", upkeep.BROWSER_GUARD[1]])
         self.assertEqual(len(after["hooks"]["Stop"]), 2)
         self.assertEqual(after["hooks"]["UserPromptSubmit"], [{"hooks": [upkeep._hook(upkeep.REMIND)]}])
         self.assertEqual(len(after["hooks"]["SessionStart"]), 5)
