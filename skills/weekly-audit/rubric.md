@@ -10,4 +10,4 @@ For each chat, with its row from `measure.json` as the numbers:
 
 Mark every claim **checked** (read in the transcript or the counts) or **inferred** (say from what). Quote at most 12 words at a time, only where a quote proves the point. Never write money figures, account numbers, record ids or anyone's name: use roles (the owner, a client's controller).
 
-Write your findings to the file you were given, one section per chat, then your improvements across those chats, ranked. Return only a summary of at most 150 words: the top patterns and improvements.
+Write no files. Return your findings as text, at most 1,500 words: first a summary of at most 150 words (the top patterns and improvements), then one section per chat, then your improvements across those chats, ranked. Your supervisor saves them in the private audits folder.
